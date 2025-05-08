@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+spec:
+  replicas: 1                    # 根據需求，部署單一實例或多個副本
+  selector:
+    matchLabels:
+      app: mosquitto
+  template:
+    metadata:
+      labels:
+        app: mosquitto
+    spec:
+      containers:
+      - name: mosquitto
+        image: eclipse-mosquitto:2.0   # 使用官方 Mosquitto 映像
+        ports:
+        - containerPort: 1883          # 開放 MQTT 監聽埠
+        volumeMounts:
+        - name: config
+          mountPath: /mosquitto/config/mosquitto.conf
+          subPath: mosquitto.conf        # 指定 ConfigMap 中的檔案
+      volumes:
+      - name: config
+        configMap:
+          name: mosquitto-config         # 引用上面建立的 ConfigMap

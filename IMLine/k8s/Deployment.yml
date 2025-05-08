@@ -1,0 +1,49 @@
+apiVersion: apps/v1   # API 版本
+kind: Deployment      # 資源類型
+metadata:
+  name: im-line       # 部署的名字
+  labels:
+    app: im-line       # 標籤，可以用于選擇器
+spec:
+  replicas: 1         # 副本数，定義希望运行的 Pod 數量
+  selector:
+    matchLabels:
+      app: im-line     # 選擇器，用于匹配 Pod 的標籤
+  template:
+    metadata:
+      labels:
+        app: im-line   # Pod 標籤
+    spec:
+      initContainers:
+      - name: wait-for-rabbitmq
+        image: busybox
+        command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is up"']
+      - name: wait-for-mosquitto
+        image: busybox
+        command: ['sh', '-c', 'until nc -z mosquitto 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
+      containers:
+        - name: im-line   # 容器的名字
+          image: key1500/im-line:v1  # 容器鏡像
+          env:
+          - name: LINE_CHANNEL_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: linebot-secret
+                key: LINE_CHANNEL_SECRET
+          - name: LINE_ACCESS_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: linebot-secret
+                key: LINE_CHANNEL_ACCESS_TOKEN
+          - name: NGROK_AUTH
+            value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"
+          - name: IOTQUEUE_HOST
+            value: "mosquitto"
+          - name: IOTQUEUE_PORT
+            value: "1883"
+          - name: RABBITMQ_HOST
+            value: "rabbitmq"
+          - name: RABBITMQ_PORT
+            value: "5672"
+          ports:
+            - containerPort: 5001   # 容器暴露的端口

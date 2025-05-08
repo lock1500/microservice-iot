@@ -77,4 +77,4 @@ def get_status():
     return {"status": "success", "message": device["state"], "state": device["state"], "device_id": device_id}, 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=config.ESP32_API_PORT)  # Use config.ESP32_API_PORT
+    app.run(host="0.0.0.0", port=config.ESP32_DEVICE_PORT)  # Use config.ESP32_API_PORT

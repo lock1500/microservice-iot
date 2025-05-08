@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: iot-esp32
+spec:
+  selector:
+    app: iot-esp32
+  ports:
+    - protocol: TCP
+      port: 82
+      targetPort: 5002
+      nodePort: 30002     
+  type: NodePort         

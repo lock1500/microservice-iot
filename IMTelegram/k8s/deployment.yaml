@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: im-telegram
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: im-telegram
+  template:
+    metadata:
+      labels:
+        app: im-telegram
+    spec:
+      initContainers:
+      - name: wait-for-rabbitmq
+        image: busybox
+        command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is up"']
+      - name: wait-for-mosquitto
+        image: busybox
+        command: ['sh', '-c', 'until nc -z mosquitto 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
+      containers:
+        - name: im-telegram
+          image: key1500/im-telegram:v1 # 用你的 Docker 映像名稱
+          ports:
+            - containerPort: 5000
+          env:
+            - name: TELEGRAM_BOT_TOKEN
+              value: "8034389107:AAEJ1DfTD0tbdb_fDqQHFJBct1KWK5aI0Ac"  # 直接在此處設置 Bot Token (測試用)
+            - name: NGROK_AUTH
+              value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"
+            - name: IOTQUEUE_HOST
+              value: "mosquitto"
+            - name: IOTQUEUE_PORT
+              value: "1883"
+            - name: RABBITMQ_HOST
+              value: "rabbitmq"
+            - name: RABBITMQ_PORT
+              value: "5672"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: im-telegram
+spec:
+  selector:
+    app: im-telegram
+  ports:
+  - protocol: TCP
+    port: 80         # ClusterIP 可訪問的端口
+    targetPort: 5000 # Pod 容器內的應用端口
+    nodePort: 30000
+  type: NodePort
+
+

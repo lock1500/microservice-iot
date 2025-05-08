@@ -1,0 +1,14 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: rabbitmq
+spec:
+  replicas: 1
+  rabbitmq:
+    additionalConfig: |
+      default_user=guest
+      default_pass=guest
+      log.console.level = debug
+    # log.console.level = info
+   # additionalPlugins:
+    #  - rabbitmq_mqtt

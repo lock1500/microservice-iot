@@ -1,0 +1,49 @@
+{
+    "rabbit_version": "3.8.14",
+    "users": [
+      {
+        "name": "user",
+        "password_hash": "5f4dcc3b5aa765d61d8327deb882cf99",
+        "tags": "administrator"
+      }
+    ],
+    "vhosts": [
+      {
+        "name": "/"
+      }
+    ],
+    "permissions": [
+      {
+        "user": "user",
+        "vhost": "/",
+        "configure": ".*",
+        "write": ".*",
+        "read": ".*"
+      }
+    ],
+    "queues": [
+      {
+        "name": "line_messages",
+        "vhost": "/",
+        "durable": true
+      }
+    ],
+    "exchanges": [
+      {
+        "name": "my_exchange",
+        "vhost": "/",
+        "type": "direct",
+        "durable": true
+      }
+    ],
+    "bindings": [
+      {
+        "source": "my_exchange",
+        "vhost": "/",
+        "destination": "line_messages",
+        "destination_type": "queue",
+        "routing_key": "line_key"
+      }
+    ]
+  }
+  

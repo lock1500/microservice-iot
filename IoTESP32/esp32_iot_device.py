@@ -38,7 +38,8 @@ class ESP32Device:
             parameters = pika.ConnectionParameters(
                 host=config.RABBITMQ_HOST,
                 port=config.RABBITMQ_PORT,
-                heartbeat=30
+                heartbeat=30,
+                blocked_connection_timeout=60
             )
             self.rabbitmq_connection = pika.BlockingConnection(parameters)
             self.rabbitmq_channel = self.rabbitmq_connection.channel()
@@ -108,7 +109,7 @@ class ESP32Device:
             self.client.publish(f"esp32/light/{self.device_id}/status", json.dumps({"status": status}))
 
     def get_api_base_url(self):
-        return f"http://{config.ESP32_API_HOST}:{config.ESP32_API_PORT}"
+        return f"http://{config.ESP32_DEVICE_HOST}:{config.ESP32_DEVICE_PORT}"
 
     def enable(self, chat_id: str = None, platform: str = "telegram"):
         try:
@@ -253,5 +254,5 @@ if __name__ == "__main__":
     mqtt_thread.start()
 
     # Start Flask service on ESP32-specific port
-    logger.info(f"Starting Flask API for ESP32Device on port {config.ESP32_IOT_DEVICE_PORT}")
-    app.run(host="0.0.0.0", port=config.ESP32_IOT_DEVICE_PORT, threaded=True)
+    logger.info(f"Starting Flask API for ESP32Device on port {config.ESP32_API_PORT}")
+    app.run(host="0.0.0.0", port=config.ESP32_API_PORT, threaded=True)
