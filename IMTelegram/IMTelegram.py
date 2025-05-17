@@ -119,10 +119,10 @@ def send_all_message_route():
 # Main entry point
 if __name__ == "__main__":
     # Start IMQbroker to consume IMQueue in a thread
-    imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue)
+    imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue, args=("telegram",))
     imqbroker_thread.daemon = True  # Set as daemon thread
     imqbroker_thread.start()
-    logger.info("IMQbroker started in a separate thread")
+    logger.info("IMQbroker started in a separate thread for Telegram")
 
     # Start Flask service
     app.run(host="0.0.0.0", port=config.TELEGRAM_API_PORT)

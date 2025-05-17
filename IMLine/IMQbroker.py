@@ -30,38 +30,61 @@ def send_message(chat_id: str, text: str, platform: str = "telegram") -> bool:
         logger.error(f"Error sending message via API: {e}")
         return False
 
-# Function: Consume messages from IMQueue and handle device status
-def consume_im_queue():
+# Function: Consume messages from platform-specific IMQueue
+def consume_im_queue(platform="telegram"):
     try:
         connection = pika.BlockingConnection(
             pika.ConnectionParameters(host=config.RABBITMQ_HOST, port=config.RABBITMQ_PORT, heartbeat=30, blocked_connection_timeout=60)
         )  # Connect to RabbitMQ
         channel = connection.channel()  # Create channel
-        channel.queue_declare(queue=config.RABBITMQ_QUEUE, durable=True)  # Declare queue with durable=True
+
+        # Declare exchange
+        exchange_name = "im_exchange"
+        channel.exchange_declare(exchange=exchange_name, exchange_type="direct")
+
+        # Declare platform-specific queue
+        queue_name = f"im_queue_{platform}"
+        channel.queue_declare(queue=queue_name, durable=True)
+
+        # Bind queue to exchange with platform as routing key
+        channel.queue_bind(queue=queue_name, exchange=exchange_name, routing_key=platform)
+
+        # Set prefetch count for fair dispatching
+        channel.basic_qos(prefetch_count=1)
 
         # Callback: Process received messages
         def callback(ch, method, properties, body):
-            message = json.loads(body)  # Parse message
-            logger.info(f"Received message from IM Queue: {message}")
+            try:
+                message = json.loads(body)  # Parse message
+                logger.info(f"Received message from IM Queue ({platform}): {message}")
 
-            # Process only device status messages
-            if "device_status" in message:
-                chat_id = message.get("chat_id")  # Get chat ID
-                status = message["device_status"]  # Get device status
-                platform = message.get("platform", "telegram")  # Get platform
-                device_id = message.get("device_id", config.DEVICE_ID)  # Get device_id, fallback to config.DEVICE_ID
-                if chat_id:
-                    if status == "enabled":
-                        send_message(chat_id, f"Device {device_id} enabled", platform)  # Notify enabled
-                    elif status == "disabled":
-                        send_message(chat_id, f"Device {device_id} disabled", platform)  # Notify disabled
+                # Process only device status messages
+                if "device_status" in message:
+                    chat_id = message.get("chat_id")  # Get chat ID
+                    status = message["device_status"]  # Get device status
+                    message_platform = message.get("platform", platform)  # Use message platform or fallback to consumer platform
+                    device_id = message.get("device_id", config.DEVICE_ID)  # Get device_id, fallback to config.DEVICE_ID
+                    if chat_id:
+                        if status == "enabled":
+                            send_message(chat_id, f"Device {device_id} enabled", message_platform)  # Notify enabled
+                        elif status == "disabled":
+                            send_message(chat_id, f"Device {device_id} disabled", message_platform)  # Notify disabled
+                        else:
+                            send_message(chat_id, f"Device {device_id} status: {status}", message_platform)  # Notify other status
                     else:
-                        send_message(chat_id, f"Device {device_id} status: {status}", platform)  # Notify other status
+                        logger.error(f"No chat_id found in message: {message}")
 
-        channel.basic_consume(queue=config.RABBITMQ_QUEUE, on_message_callback=callback, auto_ack=True)  # Start consuming queue
-        logger.info("Started consuming IM Queue...")
+                # Acknowledge message
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                # Do not requeue failed messages; consider dead letter queue in production
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+        channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=False)  # Start consuming queue
+        logger.info(f"Started consuming IM Queue for {platform}...")
         channel.start_consuming()  # Enter consumption loop
     except Exception as e:
-        logger.error(f"Error consuming IM Queue: {e}")
+        logger.error(f"Error consuming IM Queue for {platform}: {e}")
         time.sleep(5)  # Wait 5 seconds before retry
-        consume_im_queue()
+        consume_im_queue(platform)

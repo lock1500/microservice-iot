@@ -129,12 +129,13 @@ def send_all_message_route():
     success = send_all_message(message)
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 
+# Main entry point
 if __name__ == "__main__":
     # Start IMQbroker to consume IMQueue in a thread
-    imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue)
+    imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue, args=("line",))
     imqbroker_thread.daemon = True
     imqbroker_thread.start()
-    logger.info("IMQbroker started in a separate thread")
+    logger.info("IMQbroker started in a separate thread for Line")
 
     # Start Flask service
     app.run(host="0.0.0.0", port=config.LINE_API_PORT)

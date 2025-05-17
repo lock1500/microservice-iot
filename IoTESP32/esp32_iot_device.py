@@ -90,20 +90,27 @@ class ESP32Device:
     def notify_status(self, status: str, chat_id: str = None, platform: str = "telegram"):
         message = {"device_status": status, "chat_id": chat_id, "platform": platform, "device_id": self.device_id}
         try:
+            # Declare exchange
+            self.rabbitmq_channel.exchange_declare(exchange="im_exchange", exchange_type="direct")
+            # Publish to exchange with platform as routing key
             self.rabbitmq_channel.basic_publish(
-                exchange='',
-                routing_key=config.RABBITMQ_QUEUE,
-                body=json.dumps(message)
+                exchange="im_exchange",
+                routing_key=platform,
+                body=json.dumps(message),
+                properties=pika.BasicProperties(delivery_mode=2)  # Persistent message
             )
             logger.info(f"Sent device status to IM Queue: {message}")
             self.client.publish(f"esp32/light/{self.device_id}/status", json.dumps({"status": status}))
         except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed) as e:
             logger.warning(f"RabbitMQ connection lost: {e}, attempting to reconnect...")
             self.connect_rabbitmq()
+            # Re-declare exchange after reconnect
+            self.rabbitmq_channel.exchange_declare(exchange="im_exchange", exchange_type="direct")
             self.rabbitmq_channel.basic_publish(
-                exchange='',
-                routing_key=config.RABBITMQ_QUEUE,
-                body=json.dumps(message)
+                exchange="im_exchange",
+                routing_key=platform,
+                body=json.dumps(message),
+                properties=pika.BasicProperties(delivery_mode=2)  # Persistent message
             )
             logger.info(f"Sent device status to IM Queue after reconnect: {message}")
             self.client.publish(f"esp32/light/{self.device_id}/status", json.dumps({"status": status}))

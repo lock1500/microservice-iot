@@ -8,7 +8,8 @@ spec:
     additionalConfig: |
       default_user=guest
       default_pass=guest
-      log.console.level = debug
-    # log.console.level = info
+      log.console.level = info
+    # log.console.level = debug
+      
    # additionalPlugins:
     #  - rabbitmq_mqtt

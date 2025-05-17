@@ -23,7 +23,7 @@ spec:
         command: ['sh', '-c', 'until nc -z mosquitto 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
       containers:
         - name: iot-esp32   # 容器的名字
-          image: key1500/iot-esp32:v1  # 容器鏡像
+          image: key1500/iot-esp32:b0.4  # 容器鏡像
           env:
           - name: NGROK_AUTH
             value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"
