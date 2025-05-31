@@ -1,0 +1,22 @@
+name: Build and Deploy to Minikube
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-deploy:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: docker build -t test:latest .
+
+    - name: Apply Kubernetes manifests
+      run: |
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl rollout status deployment/test
