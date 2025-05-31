@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: test
-        image: test:latest
+        image: key1500/test:latest
         ports:
         - containerPort: 5030
