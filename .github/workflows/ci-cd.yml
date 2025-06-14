@@ -23,8 +23,39 @@ jobs:
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/test:latest .
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/test:latest
 
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest -f ./IMLine/Dockerfile ./IMLine
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:latest -f ./IMTelegram/Dockerfile ./IMTelegram
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:latest
+        
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:latest -f ./IoTESP32/Dockerfile ./IoTESP32
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:latest -f ./IoTRaspberrypi/Dockerfile ./IoTRaspberrypi
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:latest
+
+
     - name: Deploy to Kubernetes
       run: |
-        kubectl apply -f k8s/deployment.yml
-        kubectl apply -f k8s/service.yml
+        kubectl apply -f ./k8s/deployment.yml
+        kubectl apply -f ./k8s/service.yml
+
+        kubectl apply -f ./IMLine/k8s/Deployment.yml
+        kubectl apply -f ./IMLine/k8s/Service.yml
+        kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
+
+        kubectl apply -f ./IMTelegram/k8s/deployment.yaml
+
+        kubectl apply -f ./IoTESP32/k8s/Deployment.yml
+        kubectl apply -f ./IoTESP32/k8s/Service.yml
+
+        kubectl apply -f ./IoTRaspberrypi/k8s/Deployment.yml
+        kubectl apply -f ./IoTRaspberrypi/k8s/Service.yml
+
+        kubectl apply -f ./Mosquitto/mosquitto-config.yml
+        kubectl apply -f ./Mosquitto/mosquitto-deployment.yml
+        kubectl apply -f ./Mosquitto/mosquitto-service.yml
+
+        kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml
 
