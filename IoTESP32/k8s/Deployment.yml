@@ -36,6 +36,6 @@ spec:
           - name: RABBITMQ_PORT
             value: "5672"
           - name: ESP32_DEVICE_HOST
-            value: "192.168.0.24"
+            value: "192.168.0.12"
           ports:
             - containerPort: 5002   # 容器暴露的端口
