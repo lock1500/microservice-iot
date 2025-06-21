@@ -1,3 +1,5 @@
+from flask import Flask, request, send_from_directory, jsonify
+from flask_swagger_ui import get_swaggerui_blueprint
 import paho.mqtt.client as mqtt
 import pika
 import json
@@ -5,260 +7,351 @@ import config
 import logging
 import threading
 import time
+import os
+import base64
+from Crypto.Signature import DSS
+from Crypto.Hash import SHA256
+from Crypto.PublicKey import ECC
 import requests
-from flask import Flask, request
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
 app = Flask(__name__)
 
+# ECDSA private key
+private_key = None
+
+def load_private_key():
+    global private_key
+    try:
+        #本地測試為 "ecdsa_private.pem"，/app/keys/ecdsa_private.pem 為volume掛載於container內的path
+        if not os.path.exists("/app/keys/ecdsa_private.pem"):
+            logger.error("Private key file not found")
+            return False
+        with open("/app/keys/ecdsa_private.pem", "rt") as f:
+            private_key = ECC.import_key(f.read())
+        logger.info("Private key loaded successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to load private key: {e}")
+        return False
+
+def generate_signature(chat_id: str):
+    if not private_key:
+        return {"success": False, "error": "No private key"}
+    
+    try:
+        timestamp = str(int(time.time()))
+        message = f"{chat_id}:{timestamp}".encode()
+        h = SHA256.new(message)
+        signer = DSS.new(private_key, 'fips-186-3', encoding='der')
+        signature = signer.sign(h)
+        return {
+            "success": True,
+            "chat_id": chat_id,
+            "timestamp": timestamp,
+            "signature": base64.b64encode(signature).decode()
+        }
+    except Exception as e:
+        logger.error(f"Error generating signature: {e}")
+        return {"success": False, "error": str(e)}
+
 class RaspberryPiDevice:
-    def __init__(self, name: str, device_id: str, broker_host: str = config.IOTQUEUE_HOST, broker_port: int = config.IOTQUEUE_PORT):
+    def __init__(self, name: str, device_id: str):
         self.name = name
         self.device_id = device_id
-        self.device_type = "raspberry_pi"
-        self.broker_host = broker_host
-        self.broker_port = broker_port
-        self.client = mqtt.Client(client_id=f"pi_device_{name}_{device_id}")
-        self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
-        self.client.on_disconnect = self.on_disconnect
-        self.client.reconnect_delay_set(min_delay=1, max_delay=120)
-
-        # Initialize RabbitMQ connection
+        self.manufacturer = "raspberrypi"
+        self.device_type = "light" if "light" in device_id else "fan"
+        self.mqtt_client = self.setup_mqtt()
         self.rabbitmq_connection = None
         self.rabbitmq_channel = None
-        self.connect_rabbitmq()
+        self.rabbitmq_ioloop_thread = None
+        self.setup_rabbitmq_async()
 
-    def connect_rabbitmq(self):
+    def setup_mqtt(self):
+        client = mqtt.Client(client_id=f"pi_{self.device_id}")
+        client.on_connect = self.on_mqtt_connect
+        client.on_message = self.on_mqtt_message
+        client.on_disconnect = self.on_mqtt_disconnect
+        client.reconnect_delay_set(min_delay=1, max_delay=120)
+        return client
+
+    def setup_rabbitmq_async(self):
         try:
             parameters = pika.ConnectionParameters(
                 host=config.RABBITMQ_HOST,
-                port=config.RABBITMQ_PORT,
-                heartbeat=30,
-                blocked_connection_timeout=60
+                port=config.RABBITMQ_PORT
             )
-            self.rabbitmq_connection = pika.BlockingConnection(parameters)
-            self.rabbitmq_channel = self.rabbitmq_connection.channel()
-            self.rabbitmq_channel.queue_declare(queue=config.RABBITMQ_QUEUE, durable=True)
-            logger.info(f"Connected to RabbitMQ: host={config.RABBITMQ_HOST}, port={config.RABBITMQ_PORT}")
+            self.rabbitmq_connection = pika.SelectConnection(
+                parameters,
+                on_open_callback=self.on_rabbitmq_open,
+                on_open_error_callback=self.on_rabbitmq_open_error,
+                on_close_callback=self.on_rabbitmq_close
+            )
+            self.rabbitmq_ioloop_thread = threading.Thread(target=self.rabbitmq_connection.ioloop.start)
+            self.rabbitmq_ioloop_thread.daemon = True
+            self.rabbitmq_ioloop_thread.start()
+            logger.info("RabbitMQ async connection initiated")
         except Exception as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
-            time.sleep(5)
-            self.connect_rabbitmq()
+            logger.error(f"Failed to initiate RabbitMQ async connection: {e}")
 
-    def on_connect(self, client, userdata, flags, rc):
+    def on_rabbitmq_open(self, connection):
+        logger.info("RabbitMQ connection opened")
+        self.rabbitmq_channel = connection.channel(on_open_callback=self.on_channel_open)
+
+    def on_channel_open(self, channel):
+        logger.info("RabbitMQ channel opened")
+        self.rabbitmq_channel = channel
+        channel.exchange_declare(exchange="im_exchange", exchange_type="topic", durable=False, callback=self.on_exchange_declared)
+
+    def on_exchange_declared(self, frame):
+        self.rabbitmq_channel.queue_declare(queue=config.RABBITMQ_QUEUE, durable=True, callback=self.on_queue_declared)
+
+    def on_queue_declared(self, frame):
+        self.rabbitmq_channel.queue_bind(queue=config.RABBITMQ_QUEUE, exchange="im_exchange", routing_key="telegram.*.status_update")
+        logger.info("RabbitMQ setup complete")
+
+    def on_rabbitmq_open_error(self, connection, error):
+        logger.error(f"RabbitMQ connection failed: {error}")
+        time.sleep(5)
+        self.setup_rabbitmq_async()
+
+    def on_rabbitmq_close(self, connection, reason):
+        logger.warning(f"RabbitMQ connection closed: {reason}")
+        self.rabbitmq_channel = None
+        self.rabbitmq_connection = None
+        time.sleep(5)
+        self.setup_rabbitmq_async()
+
+    def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc == 0:
-            logger.info(f"Raspberry Pi {self.name} ({self.device_id}) connected to IOTQueue broker")
-            self.client.subscribe(f"raspberry_pi/light/{self.device_id}/message")
+            logger.info(f"Connected to MQTT broker for {self.device_id}")
+            client.subscribe(f"{self.manufacturer}/{self.device_type}/#")
         else:
-            logger.error(f"Raspberry Pi {self.name} ({self.device_id}) connection failed, return code: {rc}")
+            logger.error(f"MQTT connection failed with code {rc}")
 
-    def on_disconnect(self, client, userdata, rc):
-        logger.warning(f"Raspberry Pi {self.name} ({self.device_id}) disconnected from IOTQueue broker, attempting to reconnect...")
+    def on_mqtt_disconnect(self, client, userdata, rc):
+        logger.warning(f"MQTT disconnected, attempting to reconnect...")
 
-    def on_message(self, client, userdata, msg):
-        topic = msg.topic
-        payload = msg.payload.decode()
-        logger.info(f"Raspberry Pi {self.name} ({self.device_id}) received message - Topic: {topic}, Payload: {payload}")
+    def on_mqtt_message(self, client, userdata, msg):
+        try:
+            payload = json.loads(msg.payload.decode())
+            logger.info(f"Received MQTT message: {msg.topic} - {payload}")
 
-        if topic == f"raspberry_pi/light/{self.device_id}/message":
+            if msg.topic.endswith("enable"):
+                self.handle_enable(payload)
+            elif msg.topic.endswith("disable"):
+                self.handle_disable(payload)
+            elif msg.topic.endswith("get_status"):
+                self.handle_get_status(payload)
+                
+        except Exception as e:
+            logger.error(f"Error processing MQTT message: {e}")
+
+    def notify_status(self, status: str, chat_id: str, platform: str, username: str, bot_token: str):
+        message = {
+            "device_status": status,
+            "device_id": self.device_id,
+            "chat_id": chat_id,
+            "platform": platform,
+            "username": username,
+            "bot_token": bot_token
+        }
+        
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                payload_dict = json.loads(payload)
-                command = payload_dict.get("command")
-                chat_id = payload_dict.get("chat_id")
-                platform = payload_dict.get("platform", "telegram")
-                device_id = payload_dict.get("device_id", self.device_id)
-                if device_id != self.device_id:
-                    logger.info(f"Ignoring message for device_id {device_id}, this device is {self.device_id}")
-                    return
-                if command == "on":
-                    self.enable(chat_id, platform)
-                elif command == "off":
-                    self.disable(chat_id, platform)
-                elif command == "get_status":
-                    self.get_status(chat_id, platform)
-                elif command in ["on", "off"]:
-                    self.set_status(command, chat_id, platform)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse payload as JSON: {e}, payload: {payload}")
-                return
+                if not self.rabbitmq_channel or self.rabbitmq_channel.is_closed:
+                    logger.info(f"RabbitMQ channel closed, reconnecting (attempt {attempt + 1}/{max_retries})...")
+                    self.setup_rabbitmq_async()
+                    time.sleep(2)  # Wait longer for async setup
+                    
+                self.rabbitmq_channel.basic_publish(
+                    exchange="im_exchange",
+                    routing_key=f"{platform}/{chat_id}/status_update",
+                    body=json.dumps(message),
+                    properties=pika.BasicProperties(delivery_mode=2)
+                )
+                logger.info(f"Status update sent: {message}")
+                
+                # Generate and send signature
+                signature = generate_signature(chat_id)
+                if signature["success"]:
+                    signature["username"] = username
+                    signature["bot_token"] = bot_token
+                    requests.post(
+                        f"http://{config.ESP32_DEVICE_HOST}:{config.ESP32_DEVICE_PORT}/signature",
+                        json=signature,
+                        timeout=3
+                    )
+                break
+            except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed, pika.exceptions.ChannelClosed, pika.exceptions.ChannelClosedByBroker, ConnectionResetError) as e:
+                logger.error(f"Failed to send status update (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                else:
+                    logger.error("Max retries reached, giving up")
 
-    def notify_status(self, status: str, chat_id: str = None, platform: str = "telegram"):
-        message = {"device_status": status, "chat_id": chat_id, "platform": platform, "device_id": self.device_id}
+    def handle_enable(self, payload):
+        chat_id = payload.get("chat_id")
+        platform = payload.get("platform", "telegram")
+        username = payload.get("username", "User")
+        bot_token = payload.get("bot_token", "")
+        
         try:
-            # Declare exchange
-            self.rabbitmq_channel.exchange_declare(exchange="im_exchange", exchange_type="direct")
-            # Publish to exchange with platform as routing key
-            self.rabbitmq_channel.basic_publish(
-                exchange="im_exchange",
-                routing_key=platform,
-                body=json.dumps(message),
-                properties=pika.BasicProperties(delivery_mode=2)  # Persistent message
+            response = requests.get(
+                f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/Enable",
+                params={"device_id": self.device_id},
+                timeout=5
             )
-            logger.info(f"Sent device status to IM Queue: {message}")
-            self.client.publish(f"raspberry_pi/light/{self.device_id}/status", json.dumps({"status": status}))
-        except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed) as e:
-            logger.warning(f"RabbitMQ connection lost: {e}, attempting to reconnect...")
-            self.connect_rabbitmq()
-            # Re-declare exchange after reconnect
-            self.rabbitmq_channel.exchange_declare(exchange="im_exchange", exchange_type="direct")
-            self.rabbitmq_channel.basic_publish(
-                exchange="im_exchange",
-                routing_key=platform,
-                body=json.dumps(message),
-                properties=pika.BasicProperties(delivery_mode=2)  # Persistent message
+            
+            if response.status_code == 200:
+                self.notify_status("on", chat_id, platform, username, bot_token)
+            else:
+                logger.error(f"Enable request failed: {response.text}")
+        except Exception as e:
+            logger.error(f"Error calling enable API: {e}")
+
+    def handle_disable(self, payload):
+        chat_id = payload.get("chat_id")
+        platform = payload.get("platform", "telegram")
+        username = payload.get("username", "User")
+        bot_token = payload.get("bot_token", "")
+        
+        try:
+            response = requests.get(
+                f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/Disable",
+                params={"device_id": self.device_id},
+                timeout=5
             )
-            logger.info(f"Sent device status to IM Queue after reconnect: {message}")
-            self.client.publish(f"raspberry_pi/light/{self.device_id}/status", json.dumps({"status": status}))
-
-    def get_api_base_url(self):
-        return f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}"
-
-    def enable(self, chat_id: str = None, platform: str = "telegram"):
-        try:
-            response = requests.get(f"{self.get_api_base_url()}/Enable", params={"device_id": self.device_id})
-            if response.status_code == 200 and response.json().get("status") == "success":
-                logger.info(f"Raspberry Pi {self.name} ({self.device_id}) enabled")
-                self.notify_status("enabled", chat_id, platform)
-                return response.json()
+            
+            if response.status_code == 200:
+                self.notify_status("off", chat_id, platform, username, bot_token)
             else:
-                logger.error(f"Failed to enable device: {response.text}")
-                return {"status": "error", "message": "Failed to enable device"}
+                logger.error(f"Disable request failed: {response.text}")
         except Exception as e:
-            logger.error(f"Failed to call Raspberry Pi Enable API: {e}")
-            return {"status": "error", "message": "Failed to call API"}
+            logger.error(f"Error calling disable API: {e}")
 
-    def disable(self, chat_id: str = None, platform: str = "telegram"):
+    def handle_get_status(self, payload):
+        chat_id = payload.get("chat_id")
+        platform = payload.get("platform", "telegram")
+        username = payload.get("username", "User")
+        bot_token = payload.get("bot_token", "")
+        
         try:
-            response = requests.get(f"{self.get_api_base_url()}/Disable", params={"device_id": self.device_id})
-            if response.status_code == 200 and response.json().get("status") == "success":
-                logger.info(f"Raspberry Pi {self.name} ({self.device_id}) disabled")
-                self.notify_status("disabled", chat_id, platform)
-                return response.json()
+            response = requests.get(
+                f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/GetStatus",
+                params={"device_id": self.device_id},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                status = response.json().get("state", "unknown")
+                self.notify_status(status, chat_id, platform, username, bot_token)
             else:
-                logger.error(f"Failed to disable device: {response.text}")
-                return {"status": "error", "message": "Failed to disable device"}
+                logger.error(f"GetStatus request failed: {response.text}")
         except Exception as e:
-            logger.error(f"Failed to call Raspberry Pi Disable API: {e}")
-            return {"status": "error", "message": "Failed to call API"}
-
-    def set_status(self, status: str, chat_id: str = None, platform: str = "telegram"):
-        try:
-            response = requests.get(f"{self.get_api_base_url()}/SetStatus", params={"device_id": self.device_id, "status": status})
-            if response.status_code == 200 and response.json().get("status") == "success":
-                logger.info(f"Raspberry Pi {self.name} ({self.device_id}) status set to: {status}")
-                self.notify_status(status, chat_id, platform)
-                return response.json()
-            else:
-                logger.error(f"Failed to set device status: {response.text}")
-                return {"status": "error", "message": "Failed to set device status"}
-        except Exception as e:
-            logger.error(f"Failed to call Raspberry Pi SetStatus API: {e}")
-            return {"status": "error", "message": "Failed to call API"}
-
-    def get_status(self, chat_id: str = None, platform: str = "telegram"):
-        try:
-            response = requests.get(f"{self.get_api_base_url()}/GetStatus", params={"device_id": self.device_id})
-            if response.status_code == 200 and response.json().get("state") is not None:
-                state = response.json().get("state")
-                logger.info(f"Raspberry Pi {self.name} ({self.device_id}) status: {state}")
-                self.notify_status(state, chat_id, platform)
-                return response.json()
-            else:
-                logger.error(f"Failed to get device status: {response.text}")
-                return {"status": "error", "message": "Failed to get device status"}
-        except Exception as e:
-            logger.error(f"Failed to call Raspberry Pi GetStatus API: {e}")
-            return {"status": "error", "message": "Failed to call API"}
+            logger.error(f"Error calling GetStatus API: {e}")
 
     def start_mqtt(self):
         try:
-            self.client.connect(self.broker_host, self.broker_port)
-            self.client.loop_start()
-            logger.info(f"Raspberry Pi {self.name} ({self.device_id}) MQTT started, waiting for messages...")
+            self.mqtt_client.connect(config.IOTQUEUE_HOST, config.IOTQUEUE_PORT)
+            self.mqtt_client.loop_start()
+            logger.info(f"MQTT started for {self.device_id}")
         except Exception as e:
-            logger.error(f"Raspberry Pi {self.name} ({self.device_id}) MQTT start failed: {e}")
-            time.sleep(5)
-            self.start_mqtt()
+            logger.error(f"Failed to start MQTT: {e}")
 
     def stop(self):
-        self.client.loop_stop()
-        self.client.disconnect()
         if self.rabbitmq_connection and not self.rabbitmq_connection.is_closed:
-            self.rabbitmq_connection.close()
-        logger.info(f"Raspberry Pi {self.name} ({self.device_id}) stopped")
+            self.rabbitmq_connection.ioloop.add_callback_threadsafe(self.rabbitmq_connection.close)
+            self.rabbitmq_connection.ioloop.stop()
+        if self.rabbitmq_ioloop_thread and self.rabbitmq_ioloop_thread.is_alive():
+            self.rabbitmq_ioloop_thread.join(timeout=5)
+        logger.info("RabbitMQ connection closed")
 
-# Create Raspberry Pi device instance
-pi_device = RaspberryPiDevice("LivingRoomLight", device_id="raspberry_pi_001")
+# Create device instance
+pi_device = RaspberryPiDevice("LivingRoomLight", "raspberrypi_light_001")
 
-# Flask Routes
+# Flask routes
 @app.route('/Enable', methods=['GET'])
-def enable_route():
+def api_enable():
     device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id')
-    platform = request.args.get('platform', 'telegram')
-    if not device_id:
-        return {"status": "error", "message": "Missing device_id parameter"}, 400
-    if device_id != pi_device.device_id:
-        return {"status": "error", "message": f"Device {device_id} not found"}, 404
-
-    result = pi_device.enable(chat_id, platform)
-    return result, 200 if result.get("status") == "success" else 500
+    if not device_id or device_id != pi_device.device_id:
+        return jsonify({"status": "error", "message": "Invalid device ID"}), 400
+    
+    try:
+        response = requests.get(
+            f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/Enable",
+            params={"device_id": device_id},
+            timeout=5
+        )
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/Disable', methods=['GET'])
-def disable_route():
+def api_disable():
     device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id')
-    platform = request.args.get('platform', 'telegram')
-    if not device_id:
-        return {"status": "error", "message": "Missing device_id parameter"}, 400
-    if device_id != pi_device.device_id:
-        return {"status": "error", "message": f"Device {device_id} not found"}, 404
-
-    result = pi_device.disable(chat_id, platform)
-    return result, 200 if result.get("status") == "success" else 500
+    if not device_id or device_id != pi_device.device_id:
+        return jsonify({"status": "error", "message": "Invalid device ID"}), 400
+    
+    try:
+        response = requests.get(
+            f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/Disable",
+            params={"device_id": device_id},
+            timeout=5
+        )
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/GetStatus', methods=['GET'])
-def get_status_route():
+def api_get_status():
     device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id')
-    platform = request.args.get('platform', 'telegram')
-    if not device_id:
-        return {"status": "error", "message": "Missing device_id parameter"}, 400
-    if device_id != pi_device.device_id:
-        return {"status": "error", "message": f"Device {device_id} not found"}, 404
+    if not device_id or device_id != pi_device.device_id:
+        return jsonify({"status": "error", "message": "Invalid device ID"}), 400
+    
+    try:
+        response = requests.get(
+            f"http://{config.RASPBERRY_PI_DEVICE_HOST}:{config.RASPBERRY_PI_DEVICE_PORT}/GetStatus",
+            params={"device_id": device_id},
+            timeout=5
+        )
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    result = pi_device.get_status(chat_id, platform)
-    return result, 200 if result.get("status") == "success" else 500
+# Swagger UI setup
+SWAGGER_URL = '/swagger'
+API_URL = '/static/openapi.yaml'
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={'app_name': "Raspberry Pi IoT Device"}
+)
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
-@app.route('/SetStatus', methods=['GET'])
-def set_status_route():
-    device_id = request.args.get('device_id')
-    status = request.args.get('status')
-    chat_id = request.args.get('chat_id')
-    platform = request.args.get('platform', 'telegram')
-    if not device_id:
-        return {"status": "error", "message": "Missing device_id parameter"}, 400
-    if not status:
-        return {"status": "error", "message": "Missing status parameter"}, 400
-    if status not in ["on", "off"]:
-        return {"status": "error", "message": "Invalid status"}, 400
-    if device_id != pi_device.device_id:
-        return {"status": "error", "message": f"Device {device_id} not found"}, 404
-
-    result = pi_device.set_status(status, chat_id, platform)
-    return result, 200 if result.get("status") == "success" else 500
+@app.route('/static/<path:path>')
+def serve_swagger(path):
+    return send_from_directory('static', path)
 
 if __name__ == "__main__":
-    # Start MQTT client thread
-    mqtt_thread = threading.Thread(target=pi_device.start_mqtt)
-    mqtt_thread.daemon = True
-    mqtt_thread.start()
-
-    # Start Flask service on Raspberry Pi-specific port
-    logger.info(f"Starting Flask API for RaspberryPiDevice on port {config.RASPBERRY_PI_API_PORT}")
-    app.run(host="0.0.0.0", port=config.RASPBERRY_PI_API_PORT, threaded=True)
+    try:
+        # Load private key
+        load_private_key()
+        
+        # Ensure static directory exists
+        if not os.path.exists('static'):
+            os.makedirs('static')
+        
+        # Start MQTT in a separate thread
+        mqtt_thread = threading.Thread(target=pi_device.start_mqtt)
+        mqtt_thread.daemon = True
+        mqtt_thread.start()
+        
+        # Start Flask app
+        app.run(host="0.0.0.0", port=config.RASPBERRY_PI_API_PORT)
+    finally:
+        pi_device.stop()

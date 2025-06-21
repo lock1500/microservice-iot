@@ -1,0 +1,520 @@
+---
+openapi: 3.1.0
+info:
+  title: IoT and IM Microservices API
+  description: API specification for Instant Messaging (Telegram, Line) and IoT (ESP32, Raspberry Pi) microservices.
+  version: 1.0.0
+  contact:
+    name: Rocer52
+    email: batte9306@gmail.com
+servers:
+  - url: http://localhost:5000
+    description: Telegram API server
+  - url: http://localhost:5001
+    description: Line API server
+  - url: http://localhost:5010
+    description: ESP32 Device server
+  - url: http://localhost:5011
+    description: Raspberry Pi Device server
+
+paths:
+  # Telegram IM API
+  /webhook:
+    post:
+      summary: Handle Telegram webhook requests
+      description: Process incoming messages from Telegram users or groups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                      example: "turn on esp32_light_001"
+                    chat:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "123456789"
+                        type:
+                          type: string
+                          example: "private"
+                    from:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "987654321"
+                        username:
+                          type: string
+                          example: "user123"
+                        first_name:
+                          type: string
+                          example: "John"
+              required:
+                - message
+      responses:
+        '200':
+          description: Successful processing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /SendMsg:
+    get:
+      summary: Send a message to a Telegram user
+      description: Manually send a message to a specific Telegram chat.
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "7890547742"
+        - name: message
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "Hello from Telegram!"
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Message sent"
+        '400':
+          description: Missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to send message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /SendGroupMessage:
+    get:
+      summary: Send a message to a Telegram group
+      description: Manually send a message to a specific Telegram group.
+      parameters:
+        - name: group_id
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "-123456789"
+        - name: message
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "Hello group!"
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: Group message sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Group message sent"
+        '400':
+          description: Missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to send group message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /SendAllMessage:
+    get:
+      summary: Send a message to all Telegram users
+      description: Broadcast a message to all known Telegram chat IDs.
+      parameters:
+        - name: message
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "System update: All devices are online."
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: All messages sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "All messages sent"
+        '400':
+          description: Missing message parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Some messages failed to send
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  
+
+  # IoT Device API (ESP32 and Raspberry Pi)
+  /Enable:
+    get:
+      summary: Enable an IoT device
+      description: Enable a specific ESP32 or Raspberry Pi device by device_id.
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - esp32_light_001
+              - esp32_fan_002
+              - raspberrypi_light_001
+              - raspberrypi_fan_002
+            example: "esp32_light_001"
+        - name: chat_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "7890547742"
+        - name: platform
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - telegram
+              - line
+            default: telegram
+            example: "telegram"
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: username
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "user123"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: Device enabled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          description: Missing or invalid device_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+
+  /Disable:
+    get:
+      summary: Disable an IoT device
+      description: Disable a specific ESP32 or Raspberry Pi device by device_id.
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - esp32_light_001
+              - esp32_fan_002
+              - raspberrypi_light_001
+              - raspberrypi_fan_002
+            example: "esp32_light_001"
+        - name: chat_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "7890547742"
+        - name: platform
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - telegram
+              - line
+            default: telegram
+            example: "telegram"
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: username
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "user123"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: Device disabled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          description: Missing or invalid device_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+
+  /GetStatus:
+    get:
+      summary: Get status of an IoT device
+      description: Retrieve the current status of a specific ESP32 or Raspberry Pi device.
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - esp32_light_001
+              - esp32_fan_002
+              - raspberrypi_light_001
+              - raspberrypi_fan_002
+            example: "esp32_light_001"
+        - name: chat_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "7890547742"
+        - name: platform
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - telegram
+              - line
+            default: telegram
+            example: "telegram"
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "987654321"
+        - name: username
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "user123"
+        - name: bot_token
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "YOUR_BOT_TOKEN"
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          description: Missing or invalid device_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "Invalid request"
+      required:
+        - ok
+        - message
+
+    DeviceResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        message:
+          type: string
+          example: "Device enabled"
+        state:
+          type: string
+          example: "on"
+        device_id:
+          type: string
+          example: "esp32_light_001"
+      required:
+        - status
+        - message
+        - state
+        - device_id
+
+    DeviceErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "error"
+        message:
+          type: string
+          example: "Missing device_id parameter"
+      required:
+        - status
+        - message

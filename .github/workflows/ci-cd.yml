@@ -20,8 +20,6 @@ jobs:
 
     - name: Build and push test image
       run: |
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/test:latest .
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/test:latest
 
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest -f ./IMLine/Dockerfile ./IMLine
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest
@@ -38,18 +36,18 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
-        kubectl apply -f ./k8s/deployment.yml
-        kubectl apply -f ./k8s/service.yml
 
+        kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
         kubectl apply -f ./IMLine/k8s/Deployment.yml
         kubectl apply -f ./IMLine/k8s/Service.yml
-        kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
 
         kubectl apply -f ./IMTelegram/k8s/deployment.yaml
 
+        kubectl apply -f ./IoTESP32/k8s/ecdsa-key-secret.yml
         kubectl apply -f ./IoTESP32/k8s/Deployment.yml
         kubectl apply -f ./IoTESP32/k8s/Service.yml
 
+        kubectl apply -f ./IoTRaspberrypi/k8s/ecdsa-key-secret.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Deployment.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Service.yml
 

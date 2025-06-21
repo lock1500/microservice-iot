@@ -23,7 +23,7 @@ spec:
         command: ['sh', '-c', 'until nc -z mosquitto 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
       containers:
         - name: iot-raspberrypi   # 容器的名字
-          image: key1500/iot-rassberrypi:latest  # 容器鏡像
+          image: key1500/iot-raspberrypi:latest  # 容器鏡像
           env:
           - name: NGROK_AUTH
             value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"
@@ -39,3 +39,11 @@ spec:
             value: "192.168.0.12"
           ports:
             - containerPort: 5003   # 容器暴露的端口
+          volumeMounts:
+            - name: ecdsa-keys
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: ecdsa-keys
+          secret:
+            secretName: ecdsa-key-secret

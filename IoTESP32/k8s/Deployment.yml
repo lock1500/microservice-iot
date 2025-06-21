@@ -39,3 +39,11 @@ spec:
             value: "192.168.0.12"
           ports:
             - containerPort: 5002   # 容器暴露的端口
+          volumeMounts:
+            - name: ecdsa-keys
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: ecdsa-keys
+          secret:
+            secretName: ecdsa-key-secret
