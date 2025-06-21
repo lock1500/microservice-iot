@@ -12,11 +12,7 @@ COPY config.py .
 COPY IMTelegram.py .
 COPY IMQbroker.py .
 COPY IoTQbroker.py .
-
-# 建立 static 目錄（確保存在）
-RUN mkdir -p static
-# 複製 openapi.yaml 到 static 目錄中（供 Swagger UI 使用）
-COPY openapi.yaml ./static/
+COPY openapi.yaml .
 
 
 # 設置端口
