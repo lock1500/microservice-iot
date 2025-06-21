@@ -57,3 +57,9 @@ jobs:
 
         kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml
 
+    - name: Restart deployment
+      run: |
+        kubectl rollout restart deployment im-line -n default
+        kubectl rollout restart deployment im-telegram -n default
+        kubectl rollout restart deployment iot-esp32 -n default
+        kubectl rollout restart deployment iot-raspberrypi -n default
