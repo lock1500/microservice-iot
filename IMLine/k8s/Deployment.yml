@@ -24,6 +24,7 @@ spec:
       containers:
         - name: im-line   # 容器的名字
           image: key1500/im-line:latest  # 容器鏡像
+          imagePullPolicy: Always
           env:
           - name: LINE_CHANNEL_SECRET
             valueFrom:

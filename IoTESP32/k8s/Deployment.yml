@@ -24,6 +24,7 @@ spec:
       containers:
         - name: iot-esp32   # 容器的名字
           image: key1500/iot-esp32:latest  # 容器鏡像
+          imagePullPolicy: Always
           env:
           - name: NGROK_AUTH
             value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"

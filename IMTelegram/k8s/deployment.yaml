@@ -22,6 +22,7 @@ spec:
       containers:
         - name: im-telegram
           image: key1500/im-telegram:latest # 用你的 Docker 映像名稱
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
           env:
