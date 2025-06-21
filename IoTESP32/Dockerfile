@@ -10,11 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 複製必要文件
 COPY config.py .
 COPY esp32_iot_device.py .
-
-# 建立 static 目錄（確保存在）
-RUN mkdir -p static
-# 複製 openapi.yaml 到 static 目錄中（供 Swagger UI 使用）
-COPY openapi.yaml ./static/
+COPY openapi.yaml .
 
 
 # 設置端口
