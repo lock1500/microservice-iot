@@ -42,7 +42,7 @@ def load_private_key():
         if not os.path.exists("app/keys/ecdsa_private.pem"):
             logger.error("Private key file 'ecdsa_private.pem' not found")
             return False
-        with open("app/keys/ecdsa_private.pem", "rt") as f:
+        with open("/app/keys/ecdsa_private.pem", "rt") as f:
             private_key = ECC.import_key(f.read())
         logger.info("Private key loaded successfully")
         return True
