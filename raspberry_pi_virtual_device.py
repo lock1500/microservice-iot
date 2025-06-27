@@ -1,60 +1,66 @@
+# raspberrypi_virtual_device.py
 from flask import Flask, request, jsonify
 import logging
-import config
 import time
 import base64
-from Crypto.Signature import DSS
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import ECC
+try:
+    from Crypto.Signature import DSS
+    from Crypto.Hash import SHA256
+    from Crypto.PublicKey import ECC
+except ImportError:
+    DSS = None
+    SHA256 = None
+    ECC = None
+    logging.warning("pycryptodome not installed, signature verification disabled")
 import os
+import config
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Simulate Raspberry Pi device state
-devices = [
-    {"device_id": config.DEVICE_ID, "state": "off"}
-]
+devices = [{"device_id": "raspberrypi_light_001", "state": "off"}]
+public_key = None
 
-# ECDSA private key
-private_key = None
-
-def load_private_key():
-    global private_key
+def load_public_key():
+    global public_key
+    if ECC is None:
+        logger.error("pycryptodome not available, cannot load public key")
+        return False
     try:
-        if not os.path.exists("ecdsa_private.pem"):
-            logger.error("Private key file not found")
+        if not os.path.exists("ecdsa_public.pem"):
+            logger.error("Public key file 'ecdsa_public.pem' not found")
             return False
-        with open("ecdsa_private.pem", "rt") as f:
-            private_key = ECC.import_key(f.read())
-        logger.info("Private key loaded successfully")
+        with open("ecdsa_public.pem", "rt") as f:
+            public_key = ECC.import_key(f.read())
+        logger.info("Public key loaded successfully")
         return True
     except Exception as e:
-        logger.error(f"Failed to load private key: {e}")
+        logger.error(f"Failed to load public key: {e}")
         return False
 
-def generate_signature(chat_id: str):
-    if not private_key:
-        return {"success": False, "error": "No private key"}
+def verify_signature(chat_id: str, timestamp: str, signature_b64: str):
+    if not public_key or DSS is None or SHA256 is None:
+        logger.error("No public key or pycryptodome not available for verification")
+        return False
     
     try:
-        timestamp = str(int(time.time()))
-        message = f"{chat_id}:{timestamp}".encode()
+        current_time = int(time.time())
+        if abs(current_time - int(timestamp)) > 300:
+            logger.error("Timestamp expired")
+            return False
+            
+        message = f"{chat_id}:{timestamp}".encode('utf-8')
         h = SHA256.new(message)
-        signer = DSS.new(private_key, 'fips-186-3', encoding='der')
-        signature = signer.sign(h)
-        return {
-            "success": True,
-            "chat_id": chat_id,
-            "timestamp": timestamp,
-            "signature": base64.b64encode(signature).decode()
-        }
-    except Exception as e:
-        logger.error(f"Error generating signature: {e}")
-        return {"success": False, "error": str(e)}
+        signature = base64.b64decode(signature_b64)
+        verifier = DSS.new(public_key, 'fips-186-3')
+        verifier.verify(h, signature)
+        logger.info(f"Signature verified for chat_id: {chat_id}")
+        return True
+    except (ValueError, TypeError) as e:
+        logger.error(f"Signature verification failed: {e}")
+        return False
 
 def find_device(device_id: str):
     for device in devices:
@@ -65,84 +71,139 @@ def find_device(device_id: str):
     logger.info(f"Added new device: {device_id}")
     return new_device
 
-@app.route('/Enable', methods=['GET'])
-def enable():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
+@app.route('/signature', methods=['POST'])
+def signature():
+    data = request.get_json()
+    if not data:
+        logger.error("Missing JSON data")
+        return jsonify({"status": "error", "message": "Missing JSON data"}), 400
     
-    if not device_id:
-        return jsonify({"status": "error", "message": "Missing device_id"}), 400
+    chat_id = data.get("chat_id")
+    timestamp = data.get("timestamp")
+    signature_b64 = data.get("signature")
+    
+    if not chat_id or not timestamp or not signature_b64:
+        logger.error("Missing fields in JSON")
+        return jsonify({"status": "error", "message": "Missing fields"}), 400
+    
+    if verify_signature(chat_id, timestamp, signature_b64):
+        return jsonify({"status": "success", "message": "Signature valid"}), 200
+    else:
+        return jsonify({"status": "error", "message": "Invalid signature"}), 403
+
+@app.route('/Enable', methods=['GET', 'POST'])
+def enable():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        device_id = data.get('device_id')
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        device_id = request.args.get('device_id')
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
+    
+    if not verify_signature(chat_id, timestamp, signature_b64):
+        return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
+    
+    if not device_id or device_id != "raspberrypi_light_001":
+        logger.error(f"Invalid device_id: {device_id}, expected raspberrypi_light_001")
+        return jsonify({"status": "error", "message": "Invalid device_id, expected raspberrypi_light_001"}), 400
     
     device = find_device(device_id)
     device["state"] = "on"
-    
-    # Generate and log signature
-    signature = generate_signature(chat_id)
-    signature["username"] = username
-    signature["bot_token"] = bot_token
-    logger.info(f"Generated signature: {signature}")
     
     return jsonify({
         "status": "success",
         "message": "Device enabled",
         "state": device["state"],
         "device_id": device_id,
-        "signature_data": signature
+        "username": username
     }), 200
 
-@app.route('/Disable', methods=['GET'])
+@app.route('/Disable', methods=['GET', 'POST'])
 def disable():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        device_id = data.get('device_id')
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        device_id = request.args.get('device_id')
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
     
-    if not device_id:
-        return jsonify({"status": "error", "message": "Missing device_id"}), 400
+    if not verify_signature(chat_id, timestamp, signature_b64):
+        return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
+    
+    if not device_id or device_id != "raspberrypi_light_001":
+        logger.error(f"Invalid device_id: {device_id}, expected raspberrypi_light_001")
+        return jsonify({"status": "error", "message": "Invalid device_id, expected raspberrypi_light_001"}), 400
     
     device = find_device(device_id)
     device["state"] = "off"
-    
-    signature = generate_signature(chat_id)
-    signature["username"] = username
-    signature["bot_token"] = bot_token
-    logger.info(f"Generated signature: {signature}")
     
     return jsonify({
         "status": "success",
         "message": "Device disabled",
         "state": device["state"],
         "device_id": device_id,
-        "signature_data": signature
+        "username": username
     }), 200
 
-@app.route('/GetStatus', methods=['GET'])
+@app.route('/GetStatus', methods=['GET', 'POST'])
 def get_status():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        device_id = data.get('device_id')
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        device_id = request.args.get('device_id')
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
     
-    if not device_id:
-        return jsonify({"status": "error", "message": "Missing device_id"}), 400
+    if not verify_signature(chat_id, timestamp, signature_b64):
+        return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
+    
+    if not device_id or device_id != "raspberrypi_light_001":
+        logger.error(f"Invalid device_id: {device_id}, expected raspberrypi_light_001")
+        return jsonify({"status": "error", "message": "Invalid device_id, expected raspberrypi_light_001"}), 400
     
     device = find_device(device_id)
-    
-    signature = generate_signature(chat_id)
-    signature["username"] = username
-    signature["bot_token"] = bot_token
-    logger.info(f"Generated signature: {signature}")
     
     return jsonify({
         "status": "success",
         "message": device["state"],
         "state": device["state"],
         "device_id": device_id,
-        "signature_data": signature
+        "username": username
     }), 200
 
 if __name__ == "__main__":
-    load_private_key()
-    app.run(host="0.0.0.0", port=config.RASPBERRY_PI_DEVICE_PORT)
+    try:
+        load_public_key()
+        logger.info(f"Starting Flask app on port 5011")
+        app.run(host="0.0.0.0", port=5011, debug=False)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")

@@ -36,15 +36,20 @@ spec:
             value: "rabbitmq"
           - name: RABBITMQ_PORT
             value: "5672"
-          - name: RASPBERRY_PI_DEVICE_HOST
-            value: "192.168.0.12"
+     #    - name: RASPBERRY_PI_DEVICE_HOST
+     #      value: "192.168.0.12"
           ports:
             - containerPort: 5003   # 容器暴露的端口
           volumeMounts:
             - name: ecdsa-keys
               mountPath: /app/keys
               readOnly: true
+            - mountPath: /app/data
+              name: config-volume
       volumes:
         - name: ecdsa-keys
           secret:
             secretName: ecdsa-key-secret
+        - name: device_conf
+          persistentVolumeClaim:
+            claimName: device_conf-pvc

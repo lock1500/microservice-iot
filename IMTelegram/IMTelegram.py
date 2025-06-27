@@ -1,3 +1,4 @@
+# IMTelegram.py
 from flask import Flask, request, send_from_directory
 from flask_swagger_ui import get_swaggerui_blueprint
 import requests
@@ -11,7 +12,7 @@ from threading import Lock
 import os
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')  # Changed to DEBUG for detailed logging
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -24,19 +25,20 @@ chat_ids_lock = Lock()
 def add_chat_id(chat_id: str):
     with chat_ids_lock:
         chat_ids.add(chat_id)
+        logger.debug(f"Added chat_id={chat_id} to chat_ids set")
 
 # Function: Send message to Telegram user
 def send_message(chat_id: str, text: str, user_id: str = None) -> bool:
-    url = f"{config.TELEGRAM_API_URL}/sendMessage"
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,  # Formatted message provided by IoTQbroker
-        "user_id": user_id,
-        "bot_token": config.TELEGRAM_BOT_TOKEN
+        "text": text
     }
+    logger.debug(f"Sending Telegram message: chat_id={chat_id}, text={text}, user_id={user_id}")
     try:
         response = requests.post(url, json=payload, timeout=5)
-        if response.status_code == 200:
+        logger.debug(f"Telegram API response: status_code={response.status_code}, text={response.text}")
+        if response.status_code == 200 and response.json().get("ok"):
             logger.info(f"Message sent successfully: chat_id={chat_id}, user_id={user_id}, text={text}")
             return True
         else:
@@ -45,19 +47,6 @@ def send_message(chat_id: str, text: str, user_id: str = None) -> bool:
     except Exception as e:
         logger.error(f"Error sending message: {e}")
         return False
-
-# Function: Send message to Telegram group (same as individual message)
-def send_group_message(group_id: str, text: str, user_id: str = None) -> bool:
-    return send_message(group_id, text, user_id)
-
-# Function: Send message to all known chat_ids, thread-safe
-def send_all_message(text: str, user_id: str = None) -> bool:
-    success = True
-    with chat_ids_lock:
-        for chat_id in list(chat_ids):
-            if not send_message(chat_id, text, user_id):
-                success = False
-    return success
 
 # Route: Handle Telegram Webhook request
 @app.route('/webhook', methods=['POST'])
@@ -78,10 +67,10 @@ def webhook():
         return {"ok": False, "message": "No chat information in request"}, 400
 
     chat_id = str(chat.get('id'))
-    user_id = str(data['message']['from'].get('id', 'Unknown'))  # For device operation and logging
+    user_id = str(data['message']['from'].get('id', 'Unknown'))
     username = data['message']['from'].get('username', data['message']['from'].get('first_name', 'User'))
     if username.startswith('@'):
-        username = username[1:]  # Remove @ prefix
+        username = username[1:]
     group_id = str(chat.get('id')) if chat.get('type') in ['group', 'supergroup'] else None
 
     logger.info(f"Received message: chat_id={chat_id}, group_id={group_id}, user_id={user_id}, username={username}, text={message_text}")
@@ -91,6 +80,7 @@ def webhook():
     # Call IoTQbroker to parse message and send to IOTQueue
     device = IoTQbroker.Device("LivingRoomLight", device_id=config.DEVICE_ID, platform="telegram", chat_id=chat_id)
     iot_result = IoTQbroker.IoTParse_Message(message_text, device, chat_id, "telegram", user_id=user_id, username=username)
+    logger.debug(f"IoTParse_Message result: {iot_result}")
     return {"ok": True}, 200
 
 # Route: Manually send message to specific user
@@ -101,34 +91,58 @@ def send_message_route():
     user_id = request.args.get('user_id')
     bot_token = request.args.get('bot_token')
     if not chat_id or not message:
+        logger.error("Missing chat_id or message")
         return {"ok": False, "message": "Missing chat_id or message"}, 400
 
     success = send_message(chat_id, message, user_id)
     return {"ok": success, "message": "Message sent" if success else "Failed to send message"}, 200 if success else 500
 
-# Route: Manually send message to specific group
+# Route: Send message to all users bound to a specific device
 @app.route('/SendGroupMessage', methods=['GET'])
 def send_group_message_route():
-    group_id = request.args.get('group_id')
+    device_id = request.args.get('device_id')
     message = request.args.get('message')
     user_id = request.args.get('user_id')
     bot_token = request.args.get('bot_token')
-    if not group_id or not message:
-        return {"ok": False, "message": "Missing group_id or message"}, 400
+    if not device_id or not message:
+        logger.error("Missing device_id or message")
+        return {"ok": False, "message": "Missing device_id or message"}, 400
 
-    success = send_group_message(group_id, message, user_id)
-    return {"ok": success, "message": "Group message sent" if success else "Failed to send group message"}, 200 if success else 500
+    device = IoTQbroker.Device("LivingRoomLight", device_id=device_id)
+    bound_users = device.get_bound_users()
+    if not bound_users:
+        logger.warning(f"No bound users for device {device_id}")
+        return {"ok": False, "message": "This device has no bound users"}, 404
 
-# Route: Manually send message to all users
+    success = True
+    for chat_id in bound_users:
+        if not send_message(chat_id, message, user_id):
+            success = False
+            logger.warning(f"Failed to send message to chat_id={chat_id}")
+
+    return {"ok": success, "message": "Group message sent" if success else "Some messages failed to send"}, 200 if success else 500
+
+# Route: Send message to all users who have bound any device
 @app.route('/SendAllMessage', methods=['GET'])
 def send_all_message_route():
     message = request.args.get('message')
     user_id = request.args.get('user_id')
     bot_token = request.args.get('bot_token')
     if not message:
+        logger.error("Missing message")
         return {"ok": False, "message": "Missing message"}, 400
 
-    success = send_all_message(message, user_id)
+    all_users = IoTQbroker.Device.get_all_bound_users()
+    if not all_users:
+        logger.warning("No users have bound any device")
+        return {"ok": False, "message": "No users have bound any device"}, 404
+
+    success = True
+    for chat_id in all_users:
+        if not send_message(chat_id, message, user_id):
+            success = False
+            logger.warning(f"Failed to send message to chat_id={chat_id}")
+
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 
 # Swagger UI setup
