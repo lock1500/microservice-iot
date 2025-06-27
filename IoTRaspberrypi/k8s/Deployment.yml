@@ -45,7 +45,7 @@ spec:
               mountPath: /app/keys
               readOnly: true
             - mountPath: /app/data
-              name: config-volume
+              name: device_conf
       volumes:
         - name: ecdsa-keys
           secret:
