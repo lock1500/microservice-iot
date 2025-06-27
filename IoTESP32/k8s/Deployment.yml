@@ -45,11 +45,11 @@ spec:
               mountPath: /app/keys
               readOnly: true
             - mountPath: /app/data
-              name: device_conf
+              name: device-conf
       volumes:
         - name: ecdsa-keys
           secret:
             secretName: ecdsa-key-secret
-        - name: device_conf
+        - name: device-conf
           persistentVolumeClaim:
-            claimName: device_conf-pvc
+            claimName: device-conf-pvc
