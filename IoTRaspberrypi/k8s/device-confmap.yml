@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: device-config
+data:
+  device_config.json: |
+    {
+    "esp32": {
+        "host": "192.168.0.12",
+        "port": 5010
+    },
+    "raspberry_pi": {
+        "host": "192.168.0.12",
+        "port": 5011
+    }
+

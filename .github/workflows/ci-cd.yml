@@ -37,18 +37,19 @@ jobs:
     - name: Deploy to Kubernetes
       run: |
         
-        kubectl apply -f ./device_conf_pvc.yml
-
+        
         kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
         kubectl apply -f ./IMLine/k8s/Deployment.yml
         kubectl apply -f ./IMLine/k8s/Service.yml
 
         kubectl apply -f ./IMTelegram/k8s/deployment.yaml
 
+        kubectl apply -f ./IoTESP32/k8s/device-confmap.yml
         kubectl apply -f ./IoTESP32/k8s/ecdsa-key-secret.yml
         kubectl apply -f ./IoTESP32/k8s/Deployment.yml
         kubectl apply -f ./IoTESP32/k8s/Service.yml
 
+        kubectl apply -f ./IoTRaspberrypi/k8s/device-confmap.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/ecdsa-key-secret.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Deployment.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Service.yml

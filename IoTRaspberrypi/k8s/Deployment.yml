@@ -44,12 +44,14 @@ spec:
             - name: ecdsa-keys
               mountPath: /app/keys
               readOnly: true
-            - mountPath: /app/data
-              name: device-conf
+            - name: device-config-volume
+              mountPath: /app/data/device_config.json
+              subPath: device_config.json
+              readOnly: true
       volumes:
         - name: ecdsa-keys
           secret:
             secretName: ecdsa-key-secret
-        - name: device-conf
-          persistentVolumeClaim:
-            claimName: device-conf-pvc
+        - name: device-config-volume
+          configMap:
+            name: device-config
