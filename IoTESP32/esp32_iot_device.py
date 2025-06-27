@@ -39,7 +39,7 @@ def load_private_key():
         logger.error("pycryptodome not available, cannot load private key")
         return False
     try:
-        if not os.path.exists("app/keys/ecdsa_private.pem"):
+        if not os.path.exists("/app/keys/ecdsa_private.pem"):
             logger.error("Private key file 'ecdsa_private.pem' not found")
             return False
         with open("/app/keys/ecdsa_private.pem", "rt") as f:
