@@ -95,7 +95,7 @@ def send_all_message(text: str, display_name: str = None) -> bool:
                 logger.warning(f"Failed to send message to user_id={uid}")
     return success
 
-@app.route('/webhook', methods=['POST'])
+@app.route('/IMLine/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_json()
@@ -154,7 +154,7 @@ def webhook():
         logger.error(f"Unexpected error in webhook: {e}", exc_info=True)
         return {"ok": False, "message": "Internal server error"}, 500
 
-@app.route('/SendMsg', methods=['GET'])
+@app.route('/IMLine/SendMsg', methods=['GET'])
 def send_message_route():
     user_id = request.args.get('user_id')
     message = request.args.get('message')
@@ -164,7 +164,7 @@ def send_message_route():
     success = send_message(user_id, message, display_name)
     return {"ok": success, "message": "Message sent" if success else "Failed to send message"}, 200 if success else 500
 
-@app.route('/SendGroupMessage', methods=['GET'])
+@app.route('/IMLine/SendGroupMessage', methods=['GET'])
 def send_group_message_route():
     group_id = request.args.get('group_id')
     message = request.args.get('message')
@@ -177,7 +177,7 @@ def send_group_message_route():
     success = IMQbroker.send_message(group_id, message, "line")
     return {"ok": success, "message": "Group message sent" if success else "Failed to send group message"}, 200 if success else 500
 
-@app.route('/SendAllMessage', methods=['GET'])
+@app.route('/IMLine/SendAllMessage', methods=['GET'])
 def send_all_message_route():
     message = request.args.get('message')
     if not message:
@@ -193,8 +193,8 @@ def send_all_message_route():
             success = False
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 
-SWAGGER_URL = '/swagger'
-API_URL = '/static/openapi.yaml'
+SWAGGER_URL = '/IMLine/swagger'
+API_URL = '/IMLine/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(SWAGGER_URL, API_URL, config={'app_name': "IM and IoT Microservices"})
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 

@@ -24,7 +24,7 @@ def send_message(chat_id: str, text: str, platform: str = "telegram",
         )
         
         if platform == "telegram":
-            url = f"http://{config.TELEGRAM_API_HOST}:{config.TELEGRAM_API_PORT}/SendMsg"
+            url = f"http://{config.TELEGRAM_API_HOST}:{config.TELEGRAM_API_PORT}/IMTelegram/SendMsg"
             params = {
                 "chat_id": chat_id,
                 "message": text,
@@ -32,7 +32,7 @@ def send_message(chat_id: str, text: str, platform: str = "telegram",
                 "bot_token": final_bot_token  # 使用決定的 token
             }
         elif platform == "line":
-            url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/SendMsg"
+            url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/IMLine/SendMsg"
             params = {
                 "user_id": chat_id,  # LINE uses user_id instead of chat_id
                 "message": text,
