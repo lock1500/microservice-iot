@@ -442,8 +442,8 @@ def api_signature():
     logger.info(f"Received signature request: {data}")
     return jsonify({"status": "received"}), 200
 
-SWAGGER_URL = '/IoTRaspberrypi/swagger'
-API_URL = '/IoTRaspberrypi/static/openapi.yaml'
+SWAGGER_URL = '/IoTraspberrypi/swagger'
+API_URL = '/IoTraspberrypi/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
@@ -451,7 +451,7 @@ swaggerui_blueprint = get_swaggerui_blueprint(
 )
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
-@app.route('/IoTRaspberrypi/static/<path:path>')
+@app.route('/IoTraspberrypi/static/<path:path>')
 def serve_swagger(path):
     return send_from_directory('static', path)
 
