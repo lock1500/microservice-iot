@@ -3,7 +3,7 @@ kind: Ingress
 metadata:
   name: api-gateway
   annotations:
-    konghq.com/strip-path: "true"  # 移除 path prefix，讓微服務接收到乾淨的路徑
+    konghq.com/strip-path: "false"  # 移除 path prefix，讓微服務接收到乾淨的路徑
     konghq.com/use-regex: "true"
 spec:
   ingressClassName: kong
