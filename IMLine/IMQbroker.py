@@ -12,24 +12,16 @@ logger = logging.getLogger(__name__)
 
 greeted_users = set()
 
-def send_message(chat_id: str, text: str, platform: str = "telegram", 
-                user_id: str = None, username: str = None, 
-                bot_token: str = None) -> bool:
+def send_message(chat_id: str, text: str, platform: str = "telegram", user_id: str = None, username: str = None) -> bool:
     """Send message to the appropriate platform based on the platform parameter"""
     try:
-        # 決定使用哪個 bot_token
-        final_bot_token = bot_token or (
-            config.TELEGRAM_BOT_TOKEN if platform == "telegram" 
-            else config.LINE_ACCESS_TOKEN
-        )
-        
         if platform == "telegram":
             url = f"http://{config.TELEGRAM_API_HOST}:{config.TELEGRAM_API_PORT}/IMTelegram/SendMsg"
             params = {
                 "chat_id": chat_id,
                 "message": text,
                 "user_id": user_id,
-                "bot_token": final_bot_token  # 使用決定的 token
+                "bot_token": config.TELEGRAM_BOT_TOKEN
             }
         elif platform == "line":
             url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/IMLine/SendMsg"
@@ -37,7 +29,7 @@ def send_message(chat_id: str, text: str, platform: str = "telegram",
                 "user_id": chat_id,  # LINE uses user_id instead of chat_id
                 "message": text,
                 "caller_user_id": username,
-                "bot_token": final_bot_token  # 使用決定的 token
+                "bot_token": config.LINE_ACCESS_TOKEN
             }
         else:
             logger.error(f"Unsupported platform: {platform}")
@@ -116,8 +108,9 @@ def consume_im_queue():
 
                 status = message.get("device_status")
                 device_id = message.get("device_id", config.DEVICE_ID)
+                user_id = message.get("user_id")
                 username = message.get("username", "User")
-                bot_token = message.get("bot_token")  # 從訊息中取得 bot_token
+                bot_token = message.get("bot_token")
                 device = Device("LivingRoomLight", device_id=device_id)
 
                 if not chat_id:
@@ -137,47 +130,26 @@ def consume_im_queue():
                     greeted_users.add(chat_id)
                 formatted_message = f"{greeting}Device {device_id} is now {status}, operated by user {username}"
                 
-                # 傳遞 bot_token 參數
-                success = send_message(
-                    chat_id, 
-                    formatted_message, 
-                    platform, 
-                    user_id=None, 
-                    username=username,
-                    bot_token=bot_token
-                )
+                # Use the platform-specific send_message function
+                success = send_message(chat_id, formatted_message, platform, user_id=user_id, username=username)
                 if not success:
                     logger.warning(f"Failed to send status update to chat_id={chat_id} on platform {platform}")
 
-                # Notify all bound users
+                # Notify all bound users, excluding the initiating user and group members already notified
                 notified_users = {chat_id}
                 if device.group_id and device.group_members:
                     notified_users.update(device.group_members)
                     for member in device.group_members:
                         if member != chat_id:
                             other_message = f"Device {device_id} has been set to {status} by user {username}"
-                            send_message(
-                                member, 
-                                other_message, 
-                                platform, 
-                                user_id=None, 
-                                username=username,
-                                bot_token=bot_token
-                            )
+                            send_message(member, other_message, platform, user_id=user_id, username=username)
 
                 # Fetch all bound users for the device
                 bound_users = bindings.get(device_id, set())
                 for bound_user in bound_users:
                     if bound_user not in notified_users:
                         other_message = f"Device {device_id} has been set to {status} by user {username}"
-                        send_message(
-                            bound_user, 
-                            other_message, 
-                            platform, 
-                            user_id=None, 
-                            username=username,
-                            bot_token=bot_token
-                        )
+                        send_message(bound_user, other_message, platform, user_id=user_id, username=username)
                         notified_users.add(bound_user)
 
                 ch.basic_ack(delivery_tag=method.delivery_tag)

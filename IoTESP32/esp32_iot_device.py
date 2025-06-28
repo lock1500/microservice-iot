@@ -186,13 +186,20 @@ class ESP32Device:
                     self.setup_rabbitmq_async()
                     time.sleep(2)
                 
+                # Send the message twice
                 self.rabbitmq_channel.basic_publish(
                     exchange="im_exchange",
                     routing_key=f"{platform}/{chat_id}/status_update",
                     body=json.dumps(message),
                     properties=pika.BasicProperties(delivery_mode=2)
                 )
-                logger.info(f"Status update sent for device_id: {self.device_id}, status: {status}")
+                self.rabbitmq_channel.basic_publish(
+                    exchange="im_exchange",
+                    routing_key=f"{platform}/{chat_id}/status_update",
+                    body=json.dumps(message),
+                    properties=pika.BasicProperties(delivery_mode=2)
+                )
+                logger.info(f"Status update sent twice for device_id: {self.device_id}, status: {status}")
                 break
             except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed, 
                     pika.exceptions.ChannelClosed, pika.exceptions.ChannelClosedByBroker, 
@@ -411,8 +418,8 @@ def api_signature():
     logger.info(f"Received signature request")
     return jsonify({"status": "received"}), 200
 
-SWAGGER_URL = '/IoTesp32/swagger'
-API_URL = '/IoTesp32/static/openapi.yaml'
+SWAGGER_URL = '/swagger'
+API_URL = '/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
@@ -420,7 +427,7 @@ swaggerui_blueprint = get_swaggerui_blueprint(
 )
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
-@app.route('/IoTesp32/static/<path:path>')
+@app.route('/static/<path:path>')
 def serve_swagger(path):
     return send_from_directory('static', path)
 
