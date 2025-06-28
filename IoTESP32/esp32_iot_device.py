@@ -411,8 +411,8 @@ def api_signature():
     logger.info(f"Received signature request")
     return jsonify({"status": "received"}), 200
 
-SWAGGER_URL = '/swagger'
-API_URL = '/static/openapi.yaml'
+SWAGGER_URL = '/IoTESP32/swagger'
+API_URL = '/IoTESP32/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
@@ -420,7 +420,7 @@ swaggerui_blueprint = get_swaggerui_blueprint(
 )
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
-@app.route('/static/<path:path>')
+@app.route('/IoTESP32/static/<path:path>')
 def serve_swagger(path):
     return send_from_directory('static', path)
 
