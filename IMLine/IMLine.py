@@ -194,11 +194,11 @@ def send_all_message_route():
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 
 SWAGGER_URL = '/IMLine/swagger'
-API_URL = '/app/static/openapi.yaml'
+API_URL = '/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(SWAGGER_URL, API_URL, config={'app_name': "IM and IoT Microservices"})
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
-@app.route('/static/<path:path>')
+@app.route('/IMLine/static/<path:path>')
 def send_swagger(path):
     try:
         return send_from_directory('static', path)

@@ -147,7 +147,7 @@ def send_all_message_route():
 
 # Swagger UI setup
 SWAGGER_URL = '/IMTelegram/swagger'
-API_URL = '/app/static/openapi.yaml'
+API_URL = '/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
@@ -158,7 +158,7 @@ swaggerui_blueprint = get_swaggerui_blueprint(
 app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 
 # Serve openapi.yaml file
-@app.route('/static/<path:path>')
+@app.route('/IMTelegram/static/<path:path>')
 def send_swagger(path):
     return send_from_directory('static', path)
 
