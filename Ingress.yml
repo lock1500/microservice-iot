@@ -3,36 +3,35 @@ kind: Ingress
 metadata:
   name: api-gateway
   annotations:
-    konghq.com/strip-path: "false"  # 移除 path prefix，讓微服務接收到乾淨的路徑
-    konghq.com/use-regex: "true"
+    konghq.com/strip-path: "true"  # 移除 path prefix，讓微服務接收到乾淨的路徑
 spec:
   ingressClassName: kong
   rules:
   - http:
       paths:
-      - path: /IMLine(/|$)(.*)
-        pathType: ImplementationSpecific
+      - path: /IMLine
+        pathType: Prefix
         backend:
           service:
             name: im-line
             port:
               number: 81
-      - path: /IMTelegram(/|$)(.*)
-        pathType: ImplementationSpecific
+      - path: /IMTelegram
+        pathType: Prefix
         backend:
           service:
             name: im-telegram
             port:
               number: 80
-      - path: /IoTesp32(/|$)(.*)
-        pathType: ImplementationSpecific
+      - path: /IoTesp32
+        pathType: Prefix
         backend:
           service:
             name: iot-esp32
             port:
               number: 82
-      - path: /IoTraspberrypi(/|$)(.*)
-        pathType: ImplementationSpecific
+      - path: /IoTraspberrypi
+        pathType: Prefix
         backend:
           service:
             name: iot-raspberrypi
