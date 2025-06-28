@@ -25,7 +25,7 @@ def load_device_config(file_path=None):
         dict: Device configuration with ESP32 and Raspberry Pi host/port.
     """
     global _last_modified, _cached_config
-     # 自動根據執行環境切換
+     # 自動根據執行環境切換路徑
     if os.path.exists("/app/data/device_config.json"):
         file_path = "/app/data/device_config.json"  # 在 Pod 裡使用
     else:
