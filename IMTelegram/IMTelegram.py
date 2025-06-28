@@ -147,7 +147,7 @@ def send_all_message_route():
 
 # Swagger UI setup
 SWAGGER_URL = '/IMTelegram/swagger'
-API_URL = '/static/openapi.yaml'
+API_URL = '/IMTelegram/static/openapi.yaml'
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
     API_URL,
