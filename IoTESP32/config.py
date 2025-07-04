@@ -25,8 +25,11 @@ def load_device_config(file_path=None):
         dict: Device configuration with ESP32 and Raspberry Pi host/port.
     """
     global _last_modified, _cached_config
-    if not file_path:
-        file_path = os.path.normpath(os.path.expanduser("~/Desktop/device_config.json"))
+      # 自動根據執行環境切換
+    if os.path.exists("/app/data/device_config.json"):
+        file_path = "/app/data/device_config.json"  # 在 Pod 裡使用
+    else:
+        file_path = os.path.normpath(os.path.expanduser("~/Desktop/microservice_telegram/device_config.json"))  # 本地桌面
     
     default_config = {
         "esp32": {
