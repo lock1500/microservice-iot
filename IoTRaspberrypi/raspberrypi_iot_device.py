@@ -261,7 +261,7 @@ class RaspberryPiDevice:
         bot_token = payload.get("bot_token", "")
         device_id = payload.get("device_id")
         
-        if device_id != self.dev极_id:
+        if device_id != self.device_id:
             logger.error(f"Invalid device_id in payload: {device_id}, expected {self.device_id}")
             return
         
