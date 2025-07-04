@@ -120,14 +120,7 @@ class RaspberryPiDevice:
 
     def on_channel_open(self, channel):
         self.rabbitmq_channel = channel
-        channel.exchange_declare(exchange="im_exchange", exchange_type="topic", durable=False, callback=self.on_exchange_declared)
-
-    def on_exchange_declared(self, frame):
-        self.rabbitmq_channel.queue_declare(queue=config.RABBITMQ_QUEUE, durable=True, callback=self.on_queue_declared)
-
-    def on_queue_declared(self, frame):
-        self.rabbitmq_channel.queue_bind(queue=config.RABBITMQ_QUEUE, exchange="im_exchange", routing_key="telegram.*.status_update")
-        logger.info("RabbitMQ setup complete")
+        logger.info("RabbitMQ channel opened")
 
     def on_rabbitmq_open_error(self, connection, error):
         logger.error(f"RabbitMQ connection failed: {error}")
@@ -141,21 +134,22 @@ class RaspberryPiDevice:
         time.sleep(5)
         self.setup_rabbitmq_async()
 
+    # 添加 MQTT 回调方法
     def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc == 0:
             logger.info(f"Connected to MQTT broker for {self.device_id}")
             client.subscribe(f"{self.manufacturer}/{self.device_type}/#")
         else:
             logger.error(f"MQTT connection failed with code {rc}")
-
+    
     def on_mqtt_disconnect(self, client, userdata, rc):
         logger.warning(f"MQTT disconnected, attempting to reconnect...")
-
+    
     def on_mqtt_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode('utf-8'))
             logger.info(f"Received MQTT message: {msg.topic}")
-
+            
             if msg.topic.endswith("enable"):
                 self.handle_enable(payload)
             elif msg.topic.endswith("disable"):
@@ -186,20 +180,26 @@ class RaspberryPiDevice:
                     self.setup_rabbitmq_async()
                     time.sleep(2)
                 
-                # Send the message twice
+                # 根据平台选择不同队列
+                if platform == "line":
+                    queue_name = config.RABBITMQ_LINE_QUEUE
+                elif platform == "telegram":
+                    queue_name = config.RABBITMQ_TELEGRAM_QUEUE
+                else:
+                    logger.error(f"Unsupported platform: {platform}")
+                    return
+                
+                # 声明队列并发布消息
+                self.rabbitmq_channel.queue_declare(queue=queue_name, durable=True)
                 self.rabbitmq_channel.basic_publish(
-                    exchange="im_exchange",
-                    routing_key=f"{platform}/{chat_id}/status_update",
+                    exchange='',  # 直接发送到队列
+                    routing_key=queue_name,
                     body=json.dumps(message),
-                    properties=pika.BasicProperties(delivery_mode=2)
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,  # 使消息持久化
+                    )
                 )
-                self.rabbitmq_channel.basic_publish(
-                    exchange="im_exchange",
-                    routing_key=f"{platform}/{chat_id}/status_update",
-                    body=json.dumps(message),
-                    properties=pika.BasicProperties(delivery_mode=2)
-                )
-                logger.info(f"Status update sent twice for device_id: {self.device_id}, status: {status}")
+                logger.info(f"Status update sent to {queue_name} for device_id: {self.device_id}, status: {status}")
                 break
             except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed, 
                     pika.exceptions.ChannelClosed, pika.exceptions.ChannelClosedByBroker, 
@@ -261,7 +261,7 @@ class RaspberryPiDevice:
         bot_token = payload.get("bot_token", "")
         device_id = payload.get("device_id")
         
-        if device_id != self.device_id:
+        if device_id != self.dev极_id:
             logger.error(f"Invalid device_id in payload: {device_id}, expected {self.device_id}")
             return
         

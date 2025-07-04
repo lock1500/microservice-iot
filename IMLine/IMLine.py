@@ -221,10 +221,11 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Error setting up static directory or openapi.yaml: {e}")
     try:
-        imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue)
+        # 使用LINE专用队列
+        imqbroker_thread = threading.Thread(target=IMQbroker.consume_line_queue)
         imqbroker_thread.daemon = True
         imqbroker_thread.start()
-        logger.info("IMQbroker started in a separate thread (Line)")
+        logger.info("IMQbroker started for LINE queue")
     except Exception as e:
         logger.error(f"Failed to start IMQbroker thread: {e}")
         raise

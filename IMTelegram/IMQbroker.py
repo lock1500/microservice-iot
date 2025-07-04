@@ -48,7 +48,7 @@ def send_message(chat_id: str, text: str, platform: str = "telegram", user_id: s
         logger.error(f"Error sending message to {platform}: {e}")
         return False
 
-def consume_im_queue():
+def consume_queue(queue_name: str):
     connection = None
     channel = None
 
@@ -63,7 +63,6 @@ def consume_im_queue():
             )
             connection = pika.BlockingConnection(parameters)
             channel = connection.channel()
-            channel.exchange_declare(exchange="im_exchange", exchange_type="topic")
             logger.info(f"Initialized RabbitMQ connection: host={config.RABBITMQ_HOST}, port={config.RABBITMQ_PORT}")
         except Exception as e:
             logger.error(f"Failed to initialize RabbitMQ connection: {e}")
@@ -74,81 +73,67 @@ def consume_im_queue():
         init_rabbitmq()
 
     try:
-        queue_name = "im_queue_all"
+        # 声明队列
         channel.queue_declare(queue=queue_name, durable=True)
-        channel.queue_bind(queue=queue_name, exchange="im_exchange", routing_key="#")
         channel.basic_qos(prefetch_count=1)
 
         def callback(ch, method, properties, body):
             try:
                 message = json.loads(body)
-                routing_key = method.routing_key
-                logger.info(f"Received message from topic {routing_key}: {message}")
+                logger.info(f"Received message from queue {queue_name}: {message}")
 
-                # Parse routing key to get platform and chat_id
-                parts = routing_key.split("/")
-                if len(parts) < 3:
-                    logger.error(f"Invalid routing key format: {routing_key}")
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    return
-
-                platform = parts[0]
-                chat_id = parts[1]
-                event = parts[2] if len(parts) > 2 else "unknown"
-
-                if event != "status_update":
-                    logger.info(f"Ignoring event {event}")
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    return
-
-                if "device_status" not in message:
-                    logger.warning(f"Message does not contain device_status: {message}")
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    return
-
-                status = message.get("device_status")
+                # 从消息中获取平台信息
+                platform = message.get("platform", "unknown")
+                chat_id = message.get("chat_id")
+                device_status = message.get("device_status")
                 device_id = message.get("device_id", config.DEVICE_ID)
                 user_id = message.get("user_id")
                 username = message.get("username", "User")
                 bot_token = message.get("bot_token")
-                device = Device("LivingRoomLight", device_id=device_id)
-
+                
+                if not device_status:
+                    logger.warning(f"Message does not contain device_status: {message}")
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    return
+                
                 if not chat_id:
                     logger.error(f"No chat_id found in message: {message}")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
-                # Validate platform
+                # 验证平台
                 if platform not in ["telegram", "line"]:
-                    logger.error(f"Invalid platform in routing key: {platform}")
+                    logger.error(f"Invalid platform: {platform}")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
-                # Notify the initiating user
+                # 通知发起用户
                 greeting = f"Hi, {username}\n" if chat_id not in greeted_users else ""
                 if greeting:
                     greeted_users.add(chat_id)
-                formatted_message = f"{greeting}Device {device_id} is now {status}, operated by user {username}"
+                formatted_message = f"{greeting}Device {device_id} is now {device_status}, operated by user {username}"
                 
-                # Use the platform-specific send_message function
+                # 使用平台特定的send_message函数
                 success = send_message(chat_id, formatted_message, platform, user_id=user_id, username=username)
                 if not success:
                     logger.warning(f"Failed to send status update to chat_id={chat_id} on platform {platform}")
 
-                # Notify all bound users, excluding the initiating user and group members already notified
+                # 通知所有绑定用户，排除发起用户和已通知的群组成员
                 notified_users = {chat_id}
+                device = Device("LivingRoomLight", device_id=device_id)
+                
                 if device.group_id and device.group_members:
                     notified_users.update(device.group_members)
                     for member in device.group_members:
                         if member != chat_id:
-                            other_message = f"Device {device_id} has been set to {status} by user {username}"
+                            other_message = f"Device {device_id} has been set to {device_status} by user {username}"
                             send_message(member, other_message, platform, user_id=user_id, username=username)
 
-                # Fetch all bound users for the device
+                # 获取设备的所有绑定用户
                 bound_users = bindings.get(device_id, set())
                 for bound_user in bound_users:
                     if bound_user not in notified_users:
-                        other_message = f"Device {device_id} has been set to {status} by user {username}"
+                        other_message = f"Device {device_id} has been set to {device_status} by user {username}"
                         send_message(bound_user, other_message, platform, user_id=user_id, username=username)
                         notified_users.add(bound_user)
 
@@ -161,11 +146,19 @@ def consume_im_queue():
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
         channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=False)
-        logger.info(f"Started consuming IM queue for all platforms...")
+        logger.info(f"Started consuming {queue_name}...")
         channel.start_consuming()
     except Exception as e:
-        logger.error(f"Error consuming IM queue for all platforms: {e}")
+        logger.error(f"Error consuming queue {queue_name}: {e}")
         if connection and not connection.is_closed:
             connection.close()
         time.sleep(5)
-        consume_im_queue()
+        consume_queue(queue_name)
+
+# LINE专用队列消费者
+def consume_line_queue():
+    consume_queue(config.RABBITMQ_LINE_QUEUE)
+
+# Telegram专用队列消费者
+def consume_telegram_queue():
+    consume_queue(config.RABBITMQ_TELEGRAM_QUEUE)

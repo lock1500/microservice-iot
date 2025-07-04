@@ -25,11 +25,8 @@ def load_device_config(file_path=None):
         dict: Device configuration with ESP32 and Raspberry Pi host/port.
     """
     global _last_modified, _cached_config
-     # 自動根據執行環境切換
-    if os.path.exists("/app/data/device_config.json"):
-        file_path = "/app/data/device_config.json"  # 在 Pod 裡使用
-    else:
-        file_path = os.path.normpath(os.path.expanduser("~/Desktop/microservice_telegram/device_config.json"))  # 本地桌面
+    if not file_path:
+        file_path = os.path.normpath(os.path.expanduser("~/Desktop/device_config.json"))
     
     default_config = {
         "esp32": {
@@ -125,18 +122,20 @@ _cached_config = load_device_config(config_file_path)
 start_config_polling(config_file_path)
 
 # LINE and Telegram API configurations
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_TELEGRAM_BOT_TOKEN_HERE')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_TELEGRAM_BOT_TOKEN')
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 LINE_API_URL = os.getenv('LINE_API_URL', 'https://api.line.me/v2/bot/message')
-LINE_ACCESS_TOKEN = os.getenv('LINE_ACCESS_TOKEN', 'YOUR_LINE_ACCESS_TOKEN_HERE')
+LINE_ACCESS_TOKEN = os.getenv('LINE_ACCESS_TOKEN', 'YOUR_LINE_ACCESS_TOKEN')
 
 # IOTQueue (MQTT) and RabbitMQ configurations
 IOTQUEUE_HOST = os.getenv('IOTQUEUE_HOST', 'localhost')
 IOTQUEUE_PORT = int(os.getenv('IOTQUEUE_PORT', 1883))
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
-RABBITMQ_QUEUE = "IMQueue"
+# 创建两个独立队列
+RABBITMQ_LINE_QUEUE = "IM_Line_Queue"
+RABBITMQ_TELEGRAM_QUEUE = "IM_Telegram_Queue"
 DEVICE_ID = os.getenv('DEVICE_ID', 'esp32_light_001')
 
 # Flask API configurations

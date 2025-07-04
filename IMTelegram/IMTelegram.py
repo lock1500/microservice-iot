@@ -49,7 +49,7 @@ def send_message(chat_id: str, text: str, user_id: str = None) -> bool:
         return False
 
 # Route: Handle Telegram Webhook request
-@app.route('/IMTelegram/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
     if data is None:
@@ -84,7 +84,7 @@ def webhook():
     return {"ok": True}, 200
 
 # Route: Manually send message to specific user
-@app.route('/IMTelegram/SendMsg', methods=['GET'])
+@app.route('/SendMsg', methods=['GET'])
 def send_message_route():
     chat_id = request.args.get('chat_id')
     message = request.args.get('message')
@@ -98,7 +98,7 @@ def send_message_route():
     return {"ok": success, "message": "Message sent" if success else "Failed to send message"}, 200 if success else 500
 
 # Route: Send message to all users bound to a specific device
-@app.route('/IMTelegram/SendGroupMessage', methods=['GET'])
+@app.route('/SendGroupMessage', methods=['GET'])
 def send_group_message_route():
     device_id = request.args.get('device_id')
     message = request.args.get('message')
@@ -123,7 +123,7 @@ def send_group_message_route():
     return {"ok": success, "message": "Group message sent" if success else "Some messages failed to send"}, 200 if success else 500
 
 # Route: Send message to all users who have bound any device
-@app.route('/IMTelegram/SendAllMessage', methods=['GET'])
+@app.route('/SendAllMessage', methods=['GET'])
 def send_all_message_route():
     message = request.args.get('message')
     user_id = request.args.get('user_id')
@@ -172,10 +172,10 @@ if __name__ == "__main__":
             f.write(src.read())
 
     # Start IMQbroker to consume IMQueue in a thread
-    imqbroker_thread = threading.Thread(target=IMQbroker.consume_im_queue)
+    imqbroker_thread = threading.Thread(target=IMQbroker.consume_telegram_queue)
     imqbroker_thread.daemon = True
     imqbroker_thread.start()
-    logger.info("IMQbroker started in a separate thread (Telegram)")
+    logger.info("IMQbroker started for Telegram queue")
 
     # Start Flask service
     app.run(host="0.0.0.0", port=config.TELEGRAM_API_PORT)
