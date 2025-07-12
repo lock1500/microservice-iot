@@ -134,7 +134,6 @@ class ESP32Device:
         time.sleep(5)
         self.setup_rabbitmq_async()
 
-    # 添加缺失的 MQTT 回调方法
     def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc == 0:
             logger.info(f"Connected to MQTT broker for {self.device_id}")
@@ -180,7 +179,6 @@ class ESP32Device:
                     self.setup_rabbitmq_async()
                     time.sleep(2)
                 
-                # 根据平台选择不同队列
                 if platform == "line":
                     queue_name = config.RABBITMQ_LINE_QUEUE
                 elif platform == "telegram":
@@ -189,14 +187,13 @@ class ESP32Device:
                     logger.error(f"Unsupported platform: {platform}")
                     return
                 
-                # 声明队列并发布消息
                 self.rabbitmq_channel.queue_declare(queue=queue_name, durable=True)
                 self.rabbitmq_channel.basic_publish(
-                    exchange='',  # 直接发送到队列
+                    exchange='',
                     routing_key=queue_name,
                     body=json.dumps(message),
                     properties=pika.BasicProperties(
-                        delivery_mode=2,  # 使消息持久化
+                        delivery_mode=2,
                     )
                 )
                 logger.info(f"Status update sent to {queue_name} for device_id: {self.device_id}, status: {status}")
@@ -223,7 +220,7 @@ class ESP32Device:
                 return
             
             device_config = config.load_device_config()
-            url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/Enable"
+            url = f"{device_config['esp32']['url']}/Enable"
             
             data = {
                 "device_id": self.device_id,
@@ -262,7 +259,7 @@ class ESP32Device:
                 return
             
             device_config = config.load_device_config()
-            url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/Disable"
+            url = f"{device_config['esp32']['url']}/Disable"
             
             data = {
                 "device_id": self.device_id,
@@ -301,7 +298,7 @@ class ESP32Device:
                 return
             
             device_config = config.load_device_config()
-            url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/GetStatus"
+            url = f"{device_config['esp32']['url']}/GetStatus"
             
             data = {
                 "device_id": self.device_id,
@@ -358,7 +355,7 @@ def api_enable():
     
     try:
         device_config = config.load_device_config()
-        url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/Enable"
+        url = f"{device_config['esp32']['url']}/Enable"
         logger.info(f"Sending enable API request to {url}")
         response = requests.get(
             url,
@@ -379,7 +376,7 @@ def api_disable():
     
     try:
         device_config = config.load_device_config()
-        url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/Disable"
+        url = f"{device_config['esp32']['url']}/Disable"
         logger.info(f"Sending disable API request to {url}")
         response = requests.get(
             url,
@@ -400,7 +397,7 @@ def api_get_status():
     
     try:
         device_config = config.load_device_config()
-        url = f"http://{device_config['esp32']['host']}:{device_config['esp32']['port']}/GetStatus"
+        url = f"{device_config['esp32']['url']}/GetStatus"
         logger.info(f"Sending get_status API request to {url}")
         response = requests.get(
             url,

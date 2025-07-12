@@ -166,31 +166,80 @@ def send_message_route():
 
 @app.route('/IMLine/SendGroupMessage', methods=['GET'])
 def send_group_message_route():
-    group_id = request.args.get('group_id')
+    device_id = request.args.get('device_id')
     message = request.args.get('message')
-    if not group_id or not message:
-        return {"ok": False, "message": "Missing group_id or message"}, 400
-    from IoTQbroker import Device
-    device = Device("LivingRoomLight", config.DEVICE_ID)
-    if group_id != device.group_id:
-        return {"ok": False, "message": "Invalid group_id"}, 400
-    success = IMQbroker.send_message(group_id, message, "line")
-    return {"ok": success, "message": "Group message sent" if success else "Failed to send group message"}, 200 if success else 500
+    if not device_id or not message:
+        return {"ok": False, "message": "Missing device_id or message"}, 400
+
+    bindings = config.load_bindings()
+    bound_users = bindings.get(device_id, [])
+    if not bound_users:
+        logger.warning(f"No bound users for device {device_id}")
+        return {"ok": False, "message": "This device has no bound users"}, 404
+
+    success = True
+    for binding in bound_users:
+        chat_id = binding["chat_id"]
+        platform = binding["platform"]
+        if platform == "line":
+            if not send_message(chat_id, message):
+                success = False
+                logger.warning(f"Failed to send message to chat_id={chat_id} on Line")
+        else:  # platform == "telegram"
+            telegram_url = f"http://{config.TELEGRAM_API_HOST}:{config.TELEGRAM_API_PORT}/SendMsg"
+            params = {
+                "chat_id": chat_id,
+                "message": message,
+                "bot_token": config.TELEGRAM_BOT_TOKEN
+            }
+            try:
+                response = requests.get(telegram_url, params=params, timeout=5)
+                if response.status_code != 200 or not response.json().get("ok"):
+                    success = False
+                    logger.warning(f"Failed to send message to chat_id={chat_id} on Telegram")
+            except requests.RequestException as e:
+                success = False
+                logger.error(f"Error sending message to chat_id={chat_id} on Telegram: {e}")
+
+    return {"ok": success, "message": "Group message sent" if success else "Some messages failed to send"}, 200 if success else 500
 
 @app.route('/IMLine/SendAllMessage', methods=['GET'])
 def send_all_message_route():
     message = request.args.get('message')
     if not message:
         return {"ok": False, "message": "Missing message"}, 400
-    success = True
+
     all_bound_users = set()
-    from IoTQbroker import bindings
-    for device_id, users in bindings.items():
-        all_bound_users.update(users)
-    for user in all_bound_users:
-        display_name = get_line_user_display_name(user)
-        if not send_message(user, message, display_name):
-            success = False
+    bindings = config.load_bindings()
+    for device_id in bindings:
+        for binding in bindings[device_id]:
+            all_bound_users.add((binding["chat_id"], binding["platform"]))
+
+    if not all_bound_users:
+        return {"ok": False, "message": "No users have bound any device"}, 404
+
+    success = True
+    for chat_id, platform in all_bound_users:
+        if platform == "line":
+            if not send_message(chat_id, message):
+                success = False
+                logger.warning(f"Failed to send message to chat_id={chat_id} on Line")
+        else:  # platform == "telegram"
+            telegram_url = f"http://{config.TELEGRAM_API_HOST}:{config.TELEGRAM_API_PORT}/SendMsg"
+            params = {
+                "chat_id": chat_id,
+                "message": message,
+                "bot_token": config.TELEGRAM_BOT_TOKEN
+            }
+            try:
+                response = requests.get(telegram_url, params=params, timeout=5)
+                if response.status_code != 200 or not response.json().get("ok"):
+                    success = False
+                    logger.warning(f"Failed to send message to chat_id={chat_id} on Telegram")
+            except requests.RequestException as e:
+                success = False
+                logger.error(f"Error sending message to chat_id={chat_id} on Telegram: {e}")
+
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 
 SWAGGER_URL = '/IMLine/swagger'
@@ -221,7 +270,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Error setting up static directory or openapi.yaml: {e}")
     try:
-        # 使用LINE专用队列
         imqbroker_thread = threading.Thread(target=IMQbroker.consume_line_queue)
         imqbroker_thread.daemon = True
         imqbroker_thread.start()

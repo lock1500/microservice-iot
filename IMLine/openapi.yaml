@@ -1,4 +1,3 @@
-# openapi.yaml
 ---
 openapi: 3.1.0
 info:
@@ -19,11 +18,10 @@ servers:
     description: Raspberry Pi Device server
 
 paths:
-  # Telegram IM API
   /webhook:
     post:
-      summary: Handle Telegram webhook requests
-      description: Process incoming messages from Telegram users or groups.
+      summary: Handle Telegram or Line webhook requests
+      description: Process incoming messages from Telegram or Line users or groups.
       requestBody:
         required: true
         content:
@@ -80,27 +78,27 @@ paths:
 
   /SendMsg:
     get:
-      summary: Send a message to a Telegram user
-      description: Manually send a message to a specific Telegram chat.
+      summary: Send a message to a Telegram or Line user
+      description: Manually send a message to a specific Telegram or Line chat/user.
       parameters:
         - name: chat_id
           in: query
-          required: true
+          required: false
           schema:
             type: string
             example: "7890547742"
-        - name: message
-          in: query
-          required: true
-          schema:
-            type: string
-            example: "Hello from Telegram!"
         - name: user_id
           in: query
           required: false
           schema:
             type: string
             example: "987654321"
+        - name: message
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "Hello from Telegram or Line!"
         - name: bot_token
           in: query
           required: false
@@ -136,21 +134,21 @@ paths:
 
   /SendGroupMessage:
     get:
-      summary: Send a message to a Telegram group
-      description: Manually send a message to a specific Telegram group.
+      summary: Send a message to all users bound to a device
+      description: Broadcast a message to all users bound to a specific device across Telegram and Line.
       parameters:
-        - name: group_id
+        - name: device_id
           in: query
           required: true
           schema:
             type: string
-            example: "-123456789"
+            example: "esp32_light_001"
         - name: message
           in: query
           required: true
           schema:
             type: string
-            example: "Hello group!"
+            example: "Device update"
         - name: user_id
           in: query
           required: false
@@ -183,8 +181,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No bound users for device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: Failed to send group message
+          description: Some messages failed to send
           content:
             application/json:
               schema:
@@ -192,8 +196,8 @@ paths:
 
   /SendAllMessage:
     get:
-      summary: Send a message to all Telegram users
-      description: Broadcast a message to all known Telegram chat IDs.
+      summary: Send a message to all bound users
+      description: Broadcast a message to all users who have bound any device across Telegram and Line.
       parameters:
         - name: message
           in: query
@@ -233,6 +237,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No bound users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Some messages failed to send
           content:
@@ -240,7 +250,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  # IoT Device API (ESP32 and Raspberry Pi)
   /Enable:
     get:
       summary: Enable an IoT device

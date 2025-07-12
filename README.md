@@ -5,7 +5,7 @@ IoT Messaging System
 
 swagger ui能進去且顯示 openapi
 device_conf 用 configmap掛載，之後要用mount
-平台會搶訊息，但本地測試不會
+平台會搶訊息，但本地測試不會 (以解決，不同平台使用不同queue)
 
 待新增功能:
 綁定使用者，設置使用者名稱，傳送裝置更動訊息給所有綁定使用者

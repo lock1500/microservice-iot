@@ -13,17 +13,14 @@ logger = logging.getLogger(__name__)
 # Global client pool, used to reuse MQTT clients by chat_id
 client_pool = {}
 
-# Global bindings dictionary, used to store user-device binding relationships
-bindings = {}  # Format: {device_id: set(chat_id)}
-
 class Device:
     def __init__(self, name: str, device_id: str = config.DEVICE_ID, platform: str = "unknown", chat_id: str = None):
         self.name = name
         self.device_id = device_id
         self.chat_id = chat_id
         self.platform = platform
-        self.group_id = None  # Initialize group ID
-        self.group_members = set()  # Initialize group members set
+        self.group_id = None
+        self.group_members = set()
         self.manufacturer = "raspberrypi" if "raspberrypi" in device_id else "esp32"
         self.device_type = "light" if "light" in device_id else "fan"
         logger.info(f"Initializing device: device_id={device_id}, manufacturer={self.manufacturer}, device_type={self.device_type}")
@@ -35,36 +32,49 @@ class Device:
 
     def bind_user(self, chat_id: str, platform: str) -> bool:
         try:
-            if self.device_id not in bindings:
-                bindings[self.device_id] = set()
-            bindings[self.device_id].add(chat_id)
-            
-            if self.group_id is None:
-                # Device is not bound to any group, set as group owner
-                self.group_id = chat_id
-                self.group_members.add(chat_id)
-                logger.info(f"User chat_id={chat_id} created group for device {self.device_id}")
-            else:
-                # Device already has a group, add new member and notify others
-                if chat_id not in self.group_members:
+            if config.save_binding(self.device_id, chat_id, platform):
+                if self.group_id is None:
+                    self.group_id = chat_id
                     self.group_members.add(chat_id)
-                    logger.info(f"User chat_id={chat_id} joined group for device {self.device_id}")
-                    from IMQbroker import send_message
-                    for member in self.group_members:
-                        if member != chat_id:
-                            send_message(member, f"User {chat_id} has joined the group for device {self.device_id}", platform)
-            return True
+                    logger.info(f"User chat_id={chat_id} created group for device {self.device_id}")
+                else:
+                    if chat_id not in self.group_members:
+                        self.group_members.add(chat_id)
+                        logger.info(f"User chat_id={chat_id} joined group for device {self.device_id}")
+                        from IMQbroker import send_message
+                        for member in self.group_members:
+                            if member != chat_id:
+                                send_message(member, f"User {chat_id} has joined the group for device {self.device_id}", platform)
+                return True
+            else:
+                return False
         except Exception as e:
             logger.error(f"Failed to bind user chat_id={chat_id} to device {self.device_id}: {e}")
             return False
 
     def get_bound_users(self) -> set:
         try:
-            bound_users = bindings.get(self.device_id, set())
+            bindings = config.load_bindings()
+            bound_users = set()
+            for binding in bindings.get(self.device_id, []):
+                bound_users.add((binding["chat_id"], binding["platform"]))
             logger.info(f"Retrieved bound users for device {self.device_id}: {bound_users}")
             return bound_users
         except Exception as e:
             logger.error(f"Failed to retrieve bound users for device {self.device_id}: {e}")
+            return set()
+
+    def get_all_bound_users(self) -> set:
+        try:
+            bindings = config.load_bindings()
+            all_users = set()
+            for device_id in bindings:
+                for binding in bindings[device_id]:
+                    all_users.add((binding["chat_id"], binding["platform"]))
+            logger.info(f"Retrieved all bound users: {all_users}")
+            return all_users
+        except Exception as e:
+            logger.error(f"Failed to retrieve all bound users: {e}")
             return set()
 
     def enable(self, chat_id: str = None, platform: str = "telegram", user_id: str = None, username: str = None, bot_token: str = None) -> bool:
@@ -208,7 +218,7 @@ def IoTParse_Message(message_text: str, device: Device, chat_id: str, platform: 
                 "turn on {device_id} to enable device\n"
                 "turn off {device_id} to disable device\n"
                 "get status {device_id} to get device status\n"
-                "/Bind {device_id} to bind to device"
+                "/bind {device_id} to bind to device"
             )
             send_message(chat_id, help_text, platform, user_id=user_id, username=username)
             return {"success": True, "action": "Help"}

@@ -12,7 +12,7 @@ from threading import Lock
 import os
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')  # Changed to DEBUG for detailed logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -108,17 +108,35 @@ def send_group_message_route():
         logger.error("Missing device_id or message")
         return {"ok": False, "message": "Missing device_id or message"}, 400
 
-    device = IoTQbroker.Device("LivingRoomLight", device_id=device_id)
-    bound_users = device.get_bound_users()
+    bindings = config.load_bindings()
+    bound_users = bindings.get(device_id, [])
     if not bound_users:
         logger.warning(f"No bound users for device {device_id}")
         return {"ok": False, "message": "This device has no bound users"}, 404
 
     success = True
-    for chat_id in bound_users:
-        if not send_message(chat_id, message, user_id):
-            success = False
-            logger.warning(f"Failed to send message to chat_id={chat_id}")
+    for binding in bound_users:
+        chat_id = binding["chat_id"]
+        platform = binding["platform"]
+        if platform == "telegram":
+            if not send_message(chat_id, message, user_id):
+                success = False
+                logger.warning(f"Failed to send message to chat_id={chat_id} on Telegram")
+        else:  # platform == "line"
+            line_url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/SendMsg"
+            params = {
+                "user_id": chat_id,
+                "message": message,
+                "bot_token": config.LINE_ACCESS_TOKEN
+            }
+            try:
+                response = requests.get(line_url, params=params, timeout=5)
+                if response.status_code != 200 or not response.json().get("ok"):
+                    success = False
+                    logger.warning(f"Failed to send message to chat_id={chat_id} on Line")
+            except requests.RequestException as e:
+                success = False
+                logger.error(f"Error sending message to chat_id={chat_id} on Line: {e}")
 
     return {"ok": success, "message": "Group message sent" if success else "Some messages failed to send"}, 200 if success else 500
 
@@ -132,16 +150,37 @@ def send_all_message_route():
         logger.error("Missing message")
         return {"ok": False, "message": "Missing message"}, 400
 
-    all_users = IoTQbroker.Device.get_all_bound_users()
+    all_users = set()
+    bindings = config.load_bindings()
+    for device_id in bindings:
+        for binding in bindings[device_id]:
+            all_users.add((binding["chat_id"], binding["platform"]))
+
     if not all_users:
         logger.warning("No users have bound any device")
         return {"ok": False, "message": "No users have bound any device"}, 404
 
     success = True
-    for chat_id in all_users:
-        if not send_message(chat_id, message, user_id):
-            success = False
-            logger.warning(f"Failed to send message to chat_id={chat_id}")
+    for chat_id, platform in all_users:
+        if platform == "telegram":
+            if not send_message(chat_id, message, user_id):
+                success = False
+                logger.warning(f"Failed to send message to chat_id={chat_id} on Telegram")
+        else:  # platform == "line"
+            line_url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/SendMsg"
+            params = {
+                "user_id": chat_id,
+                "message": message,
+                "bot_token": config.LINE_ACCESS_TOKEN
+            }
+            try:
+                response = requests.get(line_url, params=params, timeout=5)
+                if response.status_code != 200 or not response.json().get("ok"):
+                    success = False
+                    logger.warning(f"Failed to send message to chat_id={chat_id} on Line")
+            except requests.RequestException as e:
+                success = False
+                logger.error(f"Error sending message to chat_id={chat_id} on Line: {e}")
 
     return {"ok": success, "message": "All messages sent" if success else "Some messages failed to send"}, 200 if success else 500
 

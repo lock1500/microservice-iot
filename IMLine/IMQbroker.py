@@ -5,7 +5,7 @@ import requests
 import logging
 import config
 import time
-from IoTQbroker import bindings, Device
+from IoTQbroker import Device
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def send_message(chat_id: str, text: str, platform: str = "telegram", user_id: s
         elif platform == "line":
             url = f"http://{config.LINE_API_HOST}:{config.LINE_API_PORT}/IMLine/SendMsg"
             params = {
-                "user_id": chat_id,  # LINE uses user_id instead of chat_id
+                "user_id": chat_id,
                 "message": text,
                 "caller_user_id": username,
                 "bot_token": config.LINE_ACCESS_TOKEN
@@ -73,7 +73,6 @@ def consume_queue(queue_name: str):
         init_rabbitmq()
 
     try:
-        # 声明队列
         channel.queue_declare(queue=queue_name, durable=True)
         channel.basic_qos(prefetch_count=1)
 
@@ -82,7 +81,6 @@ def consume_queue(queue_name: str):
                 message = json.loads(body)
                 logger.info(f"Received message from queue {queue_name}: {message}")
 
-                # 从消息中获取平台信息
                 platform = message.get("platform", "unknown")
                 chat_id = message.get("chat_id")
                 device_status = message.get("device_status")
@@ -101,24 +99,20 @@ def consume_queue(queue_name: str):
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
-                # 验证平台
                 if platform not in ["telegram", "line"]:
                     logger.error(f"Invalid platform: {platform}")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
-                # 通知发起用户
                 greeting = f"Hi, {username}\n" if chat_id not in greeted_users else ""
                 if greeting:
                     greeted_users.add(chat_id)
                 formatted_message = f"{greeting}Device {device_id} is now {device_status}, operated by user {username}"
                 
-                # 使用平台特定的send_message函数
                 success = send_message(chat_id, formatted_message, platform, user_id=user_id, username=username)
                 if not success:
                     logger.warning(f"Failed to send status update to chat_id={chat_id} on platform {platform}")
 
-                # 通知所有绑定用户，排除发起用户和已通知的群组成员
                 notified_users = {chat_id}
                 device = Device("LivingRoomLight", device_id=device_id)
                 
@@ -129,13 +123,12 @@ def consume_queue(queue_name: str):
                             other_message = f"Device {device_id} has been set to {device_status} by user {username}"
                             send_message(member, other_message, platform, user_id=user_id, username=username)
 
-                # 获取设备的所有绑定用户
-                bound_users = bindings.get(device_id, set())
-                for bound_user in bound_users:
-                    if bound_user not in notified_users:
+                bound_users = device.get_bound_users()
+                for bound_chat_id, bound_platform in bound_users:
+                    if bound_chat_id not in notified_users:
                         other_message = f"Device {device_id} has been set to {device_status} by user {username}"
-                        send_message(bound_user, other_message, platform, user_id=user_id, username=username)
-                        notified_users.add(bound_user)
+                        send_message(bound_chat_id, other_message, bound_platform, user_id=user_id, username=username)
+                        notified_users.add(bound_chat_id)
 
                 ch.basic_ack(delivery_tag=method.delivery_tag)
             except json.JSONDecodeError as e:
@@ -155,10 +148,8 @@ def consume_queue(queue_name: str):
         time.sleep(5)
         consume_queue(queue_name)
 
-# LINE专用队列消费者
 def consume_line_queue():
     consume_queue(config.RABBITMQ_LINE_QUEUE)
 
-# Telegram专用队列消费者
 def consume_telegram_queue():
     consume_queue(config.RABBITMQ_TELEGRAM_QUEUE)
