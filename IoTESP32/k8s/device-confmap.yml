@@ -6,9 +6,9 @@ data:
   device_config.json: |
     {
         "esp32": {
-            "url": "https://39016ad648ef.ngrok-free.app"
+            "url": "https://141cd9fed071.ngrok-free.app"
         },
         "raspberry_pi": {
-            "url": "https://ba0d895cae58.ngrok-free.app"
+            "url": "https://eefd05361002.ngrok-free.app"
         }
     }
