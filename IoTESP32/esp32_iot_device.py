@@ -222,7 +222,7 @@ class ESP32Device:
             device_config = config.load_device_config()
             url = f"{device_config['esp32']['url']}/Enable"
             
-            data = {
+            params = {
                 "device_id": self.device_id,
                 "chat_id": chat_id,
                 "timestamp": signature["timestamp"],
@@ -232,9 +232,9 @@ class ESP32Device:
             }
             
             logger.info(f"Sending enable request to {url}")
-            response = requests.post(
+            response = requests.get(  # 修改为GET请求
                 url,
-                json=data,
+                params=params,  # 使用查询参数
                 timeout=5
             )
             
@@ -261,7 +261,7 @@ class ESP32Device:
             device_config = config.load_device_config()
             url = f"{device_config['esp32']['url']}/Disable"
             
-            data = {
+            params = {
                 "device_id": self.device_id,
                 "chat_id": chat_id,
                 "timestamp": signature["timestamp"],
@@ -271,9 +271,9 @@ class ESP32Device:
             }
             
             logger.info(f"Sending disable request to {url}")
-            response = requests.post(
+            response = requests.get(  # 修改为GET请求
                 url,
-                json=data,
+                params=params,  # 使用查询参数
                 timeout=5
             )
             
@@ -300,7 +300,7 @@ class ESP32Device:
             device_config = config.load_device_config()
             url = f"{device_config['esp32']['url']}/GetStatus"
             
-            data = {
+            params = {
                 "device_id": self.device_id,
                 "chat_id": chat_id,
                 "timestamp": signature["timestamp"],
@@ -310,9 +310,9 @@ class ESP32Device:
             }
             
             logger.info(f"Sending get_status request to {url}")
-            response = requests.post(
+            response = requests.get(  # 修改为GET请求
                 url,
-                json=data,
+                params=params,  # 使用查询参数
                 timeout=5
             )
             
