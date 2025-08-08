@@ -37,3 +37,17 @@ spec:
             name: iot-raspberrypi
             port:
               number: 83
+      - path: /sync-telegram
+        pathType: Prefix
+        backend:
+          service:
+            name: sync-telegram
+            port:
+              number: 84
+      - path: /sync-line
+        pathType: Prefix
+        backend:
+          service:
+            name: sync-line
+            port:
+              number: 85

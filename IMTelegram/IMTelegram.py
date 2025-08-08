@@ -1,5 +1,5 @@
 # IMTelegram.py
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, jsonify
 from flask_swagger_ui import get_swaggerui_blueprint
 import requests
 import json
@@ -10,6 +10,7 @@ import IMQbroker
 import threading
 from threading import Lock
 import os
+import time  # Ensure time is imported for the test APIs
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -200,7 +201,97 @@ app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 @app.route('/IMTelegram/static/<path:path>')
 def send_swagger(path):
     return send_from_directory('static', path)
+# 模擬 Telegram 使用者發送開燈和關燈訊息的測試 API
+@app.route('/IMTelegram/test_esp32', methods=['GET'])
+def test_esp32():
+    """
+    Test API to simulate a Telegram user sending 'turn on' and 'turn off' commands for esp32_light_001.
+    Returns:
+        JSON response indicating the success or failure of the simulated commands.
+    """
+    device_id = "esp32_light_001"
+    chat_id = "7734108511"  # 模擬的 chat_id
+    user_id = "test_user_987654"  # 模擬的 user_id
+    username = "TestUser"         # 模擬的 username
+    platform = "telegram"
+    
+    logger.info(f"Starting test for ESP32 device: {device_id}")
+    
+    try:
+        # 初始化設備
+        device = IoTQbroker.Device("LivingRoomLight", device_id=device_id, platform=platform, chat_id=chat_id)
+        
+        # 模擬發送開燈命令
+        logger.info(f"Simulating 'turn on' command for {device_id}")
+        enable_result = IoTQbroker.IoTParse_Message(f"turn on {device_id}", device, chat_id, platform, user_id=user_id, username=username)
+        if not enable_result.get("success"):
+            logger.error(f"Failed to simulate 'turn on' for {device_id}: {enable_result.get('message')}")
+            return jsonify({"ok": False, "message": f"Failed to turn on {device_id}: {enable_result.get('message')}"}), 500
+        
+        
+        # 模擬發送關燈命令
+        logger.info(f"Simulating 'turn off' command for {device_id}")
+        disable_result = IoTQbroker.IoTParse_Message(f"turn off {device_id}", device, chat_id, platform, user_id=user_id, username=username)
+        if not disable_result.get("success"):
+            logger.error(f"Failed to simulate 'turn off' for {device_id}: {disable_result.get('message')}")
+            return jsonify({"ok": False, "message": f"Failed to turn off {device_id}: {disable_result.get('message')}"}), 500
+        
+        logger.info(f"Test completed successfully for {device_id}")
+        return jsonify({
+            "ok": True,
+            "message": f"Successfully simulated turn on and turn off for {device_id}",
+            "enable_result": enable_result,
+            "disable_result": disable_result
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error during ESP32 test for {device_id}: {e}")
+        return jsonify({"ok": False, "message": f"Error during test: {str(e)}"}), 500
 
+@app.route('/IMTelegram/test_raspberrypi', methods=['GET'])
+def test_raspberrypi():
+    """
+    Test API to simulate a Telegram user sending 'turn on' and 'turn off' commands for raspberrypi_light_001.
+    Returns:
+        JSON response indicating the success or failure of the simulated commands.
+    """
+    device_id = "raspberrypi_light_001"
+    chat_id = "7734108511"  # 模擬的 chat_id
+    user_id = "test_user_987654"  # 模擬的 user_id
+    username = "TestUser"         # 模擬的 username
+    platform = "telegram"
+    
+    logger.info(f"Starting test for Raspberry Pi device: {device_id}")
+    
+    try:
+        # 初始化設備
+        device = IoTQbroker.Device("LivingRoomLight", device_id=device_id, platform=platform, chat_id=chat_id)
+        
+        # 模擬發送開燈命令
+        logger.info(f"Simulating 'turn on' command for {device_id}")
+        enable_result = IoTQbroker.IoTParse_Message(f"turn on {device_id}", device, chat_id, platform, user_id=user_id, username=username)
+        if not enable_result.get("success"):
+            logger.error(f"Failed to simulate 'turn on' for {device_id}: {enable_result.get('message')}")
+            return jsonify({"ok": False, "message": f"Failed to turn on {device_id}: {enable_result.get('message')}"}), 500
+        
+        # 模擬發送關燈命令
+        logger.info(f"Simulating 'turn off' command for {device_id}")
+        disable_result = IoTQbroker.IoTParse_Message(f"turn off {device_id}", device, chat_id, platform, user_id=user_id, username=username)
+        if not disable_result.get("success"):
+            logger.error(f"Failed to simulate 'turn off' for {device_id}: {disable_result.get('message')}")
+            return jsonify({"ok": False, "message": f"Failed to turn off {device_id}: {disable_result.get('message')}"}), 500
+        
+        logger.info(f"Test completed successfully for {device_id}")
+        return jsonify({
+            "ok": True,
+            "message": f"Successfully simulated turn on and turn off for {device_id}",
+            "enable_result": enable_result,
+            "disable_result": disable_result
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error during Raspberry Pi test for {device_id}: {e}")
+        return jsonify({"ok": False, "message": f"Error during test: {str(e)}"}), 500
 # Main entry point
 if __name__ == "__main__":
     # Ensure static directory and openapi.yaml exist

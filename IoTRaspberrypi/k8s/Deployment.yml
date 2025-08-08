@@ -44,14 +44,20 @@ spec:
             - name: ecdsa-keys
               mountPath: /app/keys
               readOnly: true
-            - name: device-config-volume
-              mountPath: /app/data/device_config.json
-              subPath: device_config.json
-              readOnly: true
+          #  - name: device-config-volume
+          #    mountPath: /app/data/device_config.json
+          #    subPath: device_config.json
+          #    readOnly: true
+            - name: device-config-local 
+              mountPath: /app/data   # Pod 內部路徑
       volumes:
         - name: ecdsa-keys
           secret:
             secretName: ecdsa-key-secret
-        - name: device-config-volume
-          configMap:
-            name: device-config
+      #  - name: device-config-volume
+      #    configMap:
+      #      name: device-config
+        - name: device-config-local
+          hostPath:
+            path: /mnt/data         # Minikube 中的掛載點
+            type: Directory
