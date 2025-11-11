@@ -7,6 +7,7 @@ import config
 import time
 from IoTQbroker import Device
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

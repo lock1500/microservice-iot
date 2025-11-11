@@ -44,13 +44,18 @@ def verify_signature(chat_id: str, timestamp: str, signature_b64: str):
     if not public_key or DSS is None or SHA256 is None:
         logger.error("No public key or pycryptodome not available for verification")
         return False
-    
+
+    if not all([chat_id, timestamp, signature_b64]):
+        logger.error(f"Missing required parameters for signature verification: chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
+        return False
+
     try:
+        timestamp_int = int(timestamp)
         current_time = int(time.time())
-        if abs(current_time - int(timestamp)) > 300:
-            logger.error("Timestamp expired")
+        if abs(current_time - timestamp_int) > 300:
+            logger.error(f"Timestamp expired: current={current_time}, received={timestamp_int}")
             return False
-            
+
         message = f"{chat_id}:{timestamp}".encode('utf-8')
         h = SHA256.new(message)
         signature = base64.b64decode(signature_b64)
@@ -59,7 +64,10 @@ def verify_signature(chat_id: str, timestamp: str, signature_b64: str):
         logger.info(f"Signature verified for chat_id: {chat_id}")
         return True
     except (ValueError, TypeError) as e:
-        logger.error(f"Signature verification failed: {e}")
+        logger.error(f"Signature verification failed: {e}, chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in signature verification: {e}")
         return False
 
 def find_device(device_id: str):
@@ -75,50 +83,53 @@ def find_device(device_id: str):
 def signature():
     data = request.get_json()
     if not data:
-        logger.error("Missing JSON data")
+        logger.error("Missing JSON data in /signature request")
         return jsonify({"status": "error", "message": "Missing JSON data"}), 400
-    
+
     chat_id = data.get("chat_id")
     timestamp = data.get("timestamp")
     signature_b64 = data.get("signature")
-    
-    if not chat_id or not timestamp or not signature_b64:
-        logger.error("Missing fields in JSON")
+
+    if not all([chat_id, timestamp, signature_b64]):
+        logger.error(f"Missing fields in /signature request: chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
         return jsonify({"status": "error", "message": "Missing fields"}), 400
-    
+
     if verify_signature(chat_id, timestamp, signature_b64):
         return jsonify({"status": "success", "message": "Signature valid"}), 200
     else:
         return jsonify({"status": "error", "message": "Invalid signature"}), 403
 
-@app.route('/Enable', methods=['GET', 'POST'])
-def enable():
+# 新的 ESP32 API 路徑
+@app.route('/ESP32/<device_id>/Enable', methods=['GET', 'POST'])
+def enable_esp32(device_id):
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
-        device_id = data.get('device_id')
         chat_id = data.get('chat_id', "default")
         timestamp = data.get('timestamp')
         signature_b64 = data.get('signature')
         username = data.get('username', "User")
         bot_token = data.get('bot_token', "")
     else:
-        device_id = request.args.get('device_id')
         chat_id = request.args.get('chat_id', "default")
         timestamp = request.args.get('timestamp')
         signature_b64 = request.args.get('signature')
         username = request.args.get('username', "User")
         bot_token = request.args.get('bot_token', "")
-    
+
+    if not all([device_id, chat_id, timestamp, signature_b64]):
+        logger.error(f"Missing required parameters in /ESP32/{device_id}/Enable request: device_id={device_id}, chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
+        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+
     if not verify_signature(chat_id, timestamp, signature_b64):
         return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
-    
-    if not device_id or device_id != config.DEVICE_ID:
+
+    if device_id != config.DEVICE_ID:
         logger.error(f"Invalid device_id: {device_id}, expected {config.DEVICE_ID}")
         return jsonify({"status": "error", "message": f"Invalid device_id, expected {config.DEVICE_ID}"}), 400
-    
+
     device = find_device(device_id)
     device["state"] = "on"
-    
+
     return jsonify({
         "status": "success",
         "message": "Device enabled",
@@ -127,34 +138,36 @@ def enable():
         "username": username
     }), 200
 
-@app.route('/Disable', methods=['GET', 'POST'])
-def disable():
+@app.route('/ESP32/<device_id>/Disable', methods=['GET', 'POST'])
+def disable_esp32(device_id):
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
-        device_id = data.get('device_id')
         chat_id = data.get('chat_id', "default")
         timestamp = data.get('timestamp')
         signature_b64 = data.get('signature')
         username = data.get('username', "User")
         bot_token = data.get('bot_token', "")
     else:
-        device_id = request.args.get('device_id')
         chat_id = request.args.get('chat_id', "default")
         timestamp = request.args.get('timestamp')
         signature_b64 = request.args.get('signature')
         username = request.args.get('username', "User")
         bot_token = request.args.get('bot_token', "")
-    
+
+    if not all([device_id, chat_id, timestamp, signature_b64]):
+        logger.error(f"Missing required parameters in /ESP32/{device_id}/Disable request: device_id={device_id}, chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
+        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+
     if not verify_signature(chat_id, timestamp, signature_b64):
         return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
-    
-    if not device_id or device_id != config.DEVICE_ID:
+
+    if device_id != config.DEVICE_ID:
         logger.error(f"Invalid device_id: {device_id}, expected {config.DEVICE_ID}")
         return jsonify({"status": "error", "message": f"Invalid device_id, expected {config.DEVICE_ID}"}), 400
-    
+
     device = find_device(device_id)
     device["state"] = "off"
-    
+
     return jsonify({
         "status": "success",
         "message": "Device disabled",
@@ -163,33 +176,35 @@ def disable():
         "username": username
     }), 200
 
-@app.route('/GetStatus', methods=['GET', 'POST'])
-def get_status():
+@app.route('/ESP32/<device_id>/GetStatus', methods=['GET', 'POST'])
+def get_status_esp32(device_id):
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
-        device_id = data.get('device_id')
         chat_id = data.get('chat_id', "default")
         timestamp = data.get('timestamp')
         signature_b64 = data.get('signature')
         username = data.get('username', "User")
         bot_token = data.get('bot_token', "")
     else:
-        device_id = request.args.get('device_id')
         chat_id = request.args.get('chat_id', "default")
         timestamp = request.args.get('timestamp')
         signature_b64 = request.args.get('signature')
         username = request.args.get('username', "User")
         bot_token = request.args.get('bot_token', "")
-    
+
+    if not all([device_id, chat_id, timestamp, signature_b64]):
+        logger.error(f"Missing required parameters in /ESP32/{device_id}/GetStatus request: device_id={device_id}, chat_id={chat_id}, timestamp={timestamp}, signature_b64={signature_b64}")
+        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+
     if not verify_signature(chat_id, timestamp, signature_b64):
         return jsonify({"status": "error", "message": "Invalid or expired signature"}), 403
-    
-    if not device_id or device_id != config.DEVICE_ID:
+
+    if device_id != config.DEVICE_ID:
         logger.error(f"Invalid device_id: {device_id}, expected {config.DEVICE_ID}")
         return jsonify({"status": "error", "message": f"Invalid device_id, expected {config.DEVICE_ID}"}), 400
-    
+
     device = find_device(device_id)
-    
+
     return jsonify({
         "status": "success",
         "message": device["state"],
@@ -197,6 +212,19 @@ def get_status():
         "device_id": device_id,
         "username": username
     }), 200
+
+# 保持向後兼容的舊端點（可選）
+@app.route('/Enable', methods=['GET', 'POST'])
+def enable_legacy():
+    return enable_esp32(config.DEVICE_ID)
+
+@app.route('/Disable', methods=['GET', 'POST'])
+def disable_legacy():
+    return disable_esp32(config.DEVICE_ID)
+
+@app.route('/GetStatus', methods=['GET', 'POST'])
+def get_status_legacy():
+    return get_status_esp32(config.DEVICE_ID)
 
 if __name__ == "__main__":
     try:

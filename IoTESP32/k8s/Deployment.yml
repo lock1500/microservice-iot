@@ -5,7 +5,7 @@ metadata:
   labels:
     app: iot-esp32       # 標籤，可以用于選擇器
 spec:
-  replicas: 1         # 副本数，定義希望运行的 Pod 數量
+  replicas: 3         # 副本数，定義希望运行的 Pod 數量
   selector:
     matchLabels:
       app: iot-esp32     # 選擇器，用于匹配 Pod 的標籤
@@ -17,23 +17,23 @@ spec:
       initContainers:
       - name: wait-for-rabbitmq
         image: busybox
-        command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is up"']
+        command: ['sh', '-c', 'until nc -z rabbitmq.messaging.svc.cluster.local 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is up"']
       - name: wait-for-mosquitto
         image: busybox
-        command: ['sh', '-c', 'until nc -z mosquitto 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
+        command: ['sh', '-c', 'until nc -z mosquitto.messaging.svc.cluster.local 1883; do echo "Waiting for Mosquitto..."; sleep 2; done; echo "Mosquitto is up"']
       containers:
         - name: iot-esp32   # 容器的名字
-          image: key1500/iot-esp32:latest  # 容器鏡像
+          image: key1500/iot-esp32:mq7  # 容器鏡像
           imagePullPolicy: Always
           env:
           - name: NGROK_AUTH
             value: "2qpkTPyEdMre1nOLUzdnudDmS35_5GUFp8TkH41i6hdzVrtJY"
           - name: IOTQUEUE_HOST
-            value: "mosquitto"
+            value: "mosquitto.messaging.svc.cluster.local"
           - name: IOTQUEUE_PORT
             value: "1883"
           - name: RABBITMQ_HOST
-            value: "rabbitmq"
+            value: "rabbitmq.messaging.svc.cluster.local"
           - name: RABBITMQ_PORT
             value: "5672"
         # - name: ESP32_DEVICE_HOST

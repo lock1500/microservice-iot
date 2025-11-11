@@ -1,7 +1,6 @@
 # raspberrypi_iot_device.py
 from flask import Flask, request, send_from_directory, jsonify
 from flask_swagger_ui import get_swaggerui_blueprint
-import paho.mqtt.client as mqtt
 import pika
 import json
 import config
@@ -10,6 +9,7 @@ import threading
 import time
 import os
 import base64
+
 try:
     from Crypto.Signature import DSS
     from Crypto.Hash import SHA256
@@ -40,7 +40,7 @@ def load_private_key():
         return False
     try:
         if not os.path.exists("/app/keys/ecdsa_private.pem"):
-            logger.error("Private key file 'ecdsa_private.pem' not found")
+            logger.error("Private key file '/app/keys/ecdsa_private.pem' not found")
             return False
         with open("/app/keys/ecdsa_private.pem", "rt") as f:
             private_key = ECC.import_key(f.read())
@@ -82,84 +82,93 @@ class RaspberryPiDevice:
         self.device_id = device_id
         self.manufacturer = "raspberrypi"
         self.device_type = "light" if "light" in device_id else "fan"
-        self.mqtt_client = self.setup_mqtt()
         self.rabbitmq_connection = None
         self.rabbitmq_channel = None
-        self.rabbitmq_ioloop_thread = None
-        self.setup_rabbitmq_async()
+        self.rabbitmq_consumer_thread = None
+        self.running = False
+        self.start_rabbitmq()
 
-    def setup_mqtt(self):
-        client = mqtt.Client(client_id=f"pi_{self.device_id}")
-        client.on_connect = self.on_mqtt_connect
-        client.on_message = self.on_mqtt_message
-        client.on_disconnect = self.on_mqtt_disconnect
-        client.reconnect_delay_set(min_delay=1, max_delay=120)
-        return client
-
-    def setup_rabbitmq_async(self):
+    def setup_rabbitmq_connection(self):
+        """Setup RabbitMQ connection using BlockingConnection"""
         try:
             parameters = pika.ConnectionParameters(
                 host=config.RABBITMQ_HOST,
-                port=config.RABBITMQ_PORT
+                port=config.RABBITMQ_PORT,
+                heartbeat=30,
+                blocked_connection_timeout=60
             )
-            self.rabbitmq_connection = pika.SelectConnection(
-                parameters,
-                on_open_callback=self.on_rabbitmq_open,
-                on_open_error_callback=self.on_rabbitmq_open_error,
-                on_close_callback=self.on_rabbitmq_close
-            )
-            self.rabbitmq_ioloop_thread = threading.Thread(target=self.rabbitmq_connection.ioloop.start)
-            self.rabbitmq_ioloop_thread.daemon = True
-            self.rabbitmq_ioloop_thread.start()
-            logger.info("RabbitMQ async connection initiated")
+            self.rabbitmq_connection = pika.BlockingConnection(parameters)
+            self.rabbitmq_channel = self.rabbitmq_connection.channel()
+            logger.info("RabbitMQ BlockingConnection established successfully")
+            return True
         except Exception as e:
-            logger.error(f"Failed to initiate RabbitMQ async connection: {e}")
+            logger.error(f"Failed to establish RabbitMQ BlockingConnection: {e}")
+            return False
 
-    def on_rabbitmq_open(self, connection):
-        self.rabbitmq_channel = connection.channel(on_open_callback=self.on_channel_open)
-
-    def on_channel_open(self, channel):
-        self.rabbitmq_channel = channel
-        logger.info("RabbitMQ channel opened")
-
-    def on_rabbitmq_open_error(self, connection, error):
-        logger.error(f"RabbitMQ connection failed: {error}")
-        time.sleep(5)
-        self.setup_rabbitmq_async()
-
-    def on_rabbitmq_close(self, connection, reason):
-        logger.warning(f"RabbitMQ connection closed: {reason}")
-        self.rabbitmq_channel = None
-        self.rabbitmq_connection = None
-        time.sleep(5)
-        self.setup_rabbitmq_async()
-
-    def on_mqtt_connect(self, client, userdata, flags, rc):
-        if rc == 0:
-            logger.info(f"Connected to MQTT broker for {self.device_id}")
-            client.subscribe(f"{self.manufacturer}/{self.device_type}/#")
-        else:
-            logger.error(f"MQTT connection failed with code {rc}")
-    
-    def on_mqtt_disconnect(self, client, userdata, rc):
-        logger.warning(f"MQTT disconnected, attempting to reconnect...")
-    
-    def on_mqtt_message(self, client, userdata, msg):
+    def on_rabbitmq_message(self, channel, method, properties, body):
         try:
-            payload = json.loads(msg.payload.decode('utf-8'))
-            logger.info(f"Received MQTT message: {msg.topic}")
+            payload = json.loads(body.decode('utf-8'))
+            logger.info(f"Received RabbitMQ message: {payload}")
             
-            if msg.topic.endswith("enable"):
+            command = payload.get("command")
+            if command == "on":
                 self.handle_enable(payload)
-            elif msg.topic.endswith("disable"):
+            elif command == "off":
                 self.handle_disable(payload)
-            elif msg.topic.endswith("get_status"):
+            elif command == "get_status":
                 self.handle_get_status(payload)
                 
+            channel.basic_ack(delivery_tag=method.delivery_tag)
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in MQTT message: {e}")
+            logger.error(f"Invalid JSON in RabbitMQ message: {e}")
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         except Exception as e:
-            logger.error(f"Error processing MQTT message: {e}")
+            logger.error(f"Error processing RabbitMQ message: {e}")
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    def consume_messages(self):
+        """Consume messages from RabbitMQ queue using BlockingConnection"""
+        while self.running:
+            try:
+                if not self.rabbitmq_connection or self.rabbitmq_connection.is_closed:
+                    logger.info("RabbitMQ connection closed, reconnecting...")
+                    if not self.setup_rabbitmq_connection():
+                        time.sleep(5)
+                        continue
+
+                queue_name = "iot_raspberrypi_queue"
+                self.rabbitmq_channel.queue_declare(queue=queue_name, durable=True)
+                self.rabbitmq_channel.basic_qos(prefetch_count=1)
+                
+                logger.info(f"Starting to consume messages from {queue_name}")
+                
+                for method, properties, body in self.rabbitmq_channel.consume(
+                    queue_name, inactivity_timeout=1, auto_ack=False):
+                    
+                    if not self.running:
+                        break
+                        
+                    if method is None:
+                        continue
+                        
+                    self.on_rabbitmq_message(self.rabbitmq_channel, method, properties, body)
+                        
+            except (pika.exceptions.ConnectionClosed, 
+                   pika.exceptions.ChannelClosed,
+                   pika.exceptions.StreamLostError) as e:
+                logger.error(f"RabbitMQ connection error: {e}, reconnecting...")
+                time.sleep(5)
+            except Exception as e:
+                logger.error(f"Unexpected error in consume_messages: {e}")
+                time.sleep(5)
+
+    def start_rabbitmq(self):
+        """Start RabbitMQ consumer thread"""
+        self.running = True
+        self.rabbitmq_consumer_thread = threading.Thread(target=self.consume_messages)
+        self.rabbitmq_consumer_thread.daemon = True
+        self.rabbitmq_consumer_thread.start()
+        logger.info(f"RabbitMQ consumer started for {self.device_id}")
 
     def notify_status(self, status: str, chat_id: str, platform: str, username: str, bot_token: str):
         message = {
@@ -174,10 +183,11 @@ class RaspberryPiDevice:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                if not self.rabbitmq_channel or self.rabbitmq_channel.is_closed:
-                    logger.info(f"RabbitMQ channel closed, reconnecting (attempt {attempt + 1}/{max_retries})...")
-                    self.setup_rabbitmq_async()
-                    time.sleep(2)
+                if not self.rabbitmq_connection or self.rabbitmq_connection.is_closed:
+                    logger.info(f"RabbitMQ connection closed, reconnecting (attempt {attempt + 1}/{max_retries})...")
+                    if not self.setup_rabbitmq_connection():
+                        time.sleep(2)
+                        continue
                 
                 if platform == "line":
                     queue_name = config.RABBITMQ_LINE_QUEUE
@@ -225,7 +235,7 @@ class RaspberryPiDevice:
                 return
             
             device_config = config.load_device_config()
-            url = f"{device_config['raspberry_pi']['url']}/Enable"
+            url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/Enable"
             
             data = {
                 "device_id": self.device_id,
@@ -269,7 +279,7 @@ class RaspberryPiDevice:
                 return
             
             device_config = config.load_device_config()
-            url = f"{device_config['raspberry_pi']['url']}/Disable"
+            url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/Disable"
             
             data = {
                 "device_id": self.device_id,
@@ -313,7 +323,7 @@ class RaspberryPiDevice:
                 return
             
             device_config = config.load_device_config()
-            url = f"{device_config['raspberry_pi']['url']}/GetStatus"
+            url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/GetStatus"
             
             data = {
                 "device_id": self.device_id,
@@ -340,97 +350,184 @@ class RaspberryPiDevice:
         except requests.RequestException as e:
             logger.error(f"Error calling GetStatus API: {e}")
 
-    def start_mqtt(self):
-        try:
-            self.mqtt_client.connect(config.IOTQUEUE_HOST, config.IOTQUEUE_PORT)
-            self.mqtt_client.loop_start()
-            logger.info(f"MQTT started for {self.device_id}")
-        except Exception as e:
-            logger.error(f"Failed to start MQTT: {e}")
-
     def stop(self):
+        """Stop RabbitMQ consumer"""
+        self.running = False
         try:
             if self.rabbitmq_connection and not self.rabbitmq_connection.is_closed:
-                self.rabbitmq_connection.ioloop.add_callback_threadsafe(self.rabbitmq_connection.close)
-                self.rabbitmq_connection.ioloop.stop()
-            if self.rabbitmq_ioloop_thread and self.rabbitmq_ioloop_thread.is_alive():
-                self.rabbitmq_ioloop_thread.join(timeout=5)
+                self.rabbitmq_connection.close()
             logger.info("RabbitMQ connection closed")
         except Exception as e:
             logger.error(f"Error stopping RabbitMQ: {e}")
 
 pi_device = RaspberryPiDevice("LivingRoomLight", "raspberrypi_light_001")
 
-@app.route('/Enable', methods=['GET'])
-def api_enable():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
-    
+@app.route('/Pi/<device_id>/Enable', methods=['GET', 'POST'])
+def api_enable(device_id):
     if not device_id or device_id != pi_device.device_id:
         logger.error(f"Invalid device ID: {device_id}, expected {pi_device.device_id}")
         return jsonify({"status": "error", "message": f"Invalid device ID, expected {pi_device.device_id}"}), 400
     
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
+    
     try:
         device_config = config.load_device_config()
-        url = f"{device_config['raspberry_pi']['url']}/Enable"
+        url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/Enable"
         logger.info(f"Sending enable API request to {url}")
-        response = requests.get(
-            url,
-            params={"device_id": device_id, "chat_id": chat_id, "username": username, "bot_token": bot_token},
-            timeout=5
-        )
+        
+        if request.method == 'POST':
+            response = requests.post(
+                url,
+                json={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                params={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+            
         return jsonify(response.json()), response.status_code
     except requests.RequestException as e:
         logger.error(f"Error in enable API: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/Disable', methods=['GET'])
-def api_disable():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
-    
+@app.route('/Pi/<device_id>/Disable', methods=['GET', 'POST'])
+def api_disable(device_id):
     if not device_id or device_id != pi_device.device_id:
         logger.error(f"Invalid device ID: {device_id}, expected {pi_device.device_id}")
         return jsonify({"status": "error", "message": f"Invalid device ID, expected {pi_device.device_id}"}), 400
     
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
+    
     try:
         device_config = config.load_device_config()
-        url = f"{device_config['raspberry_pi']['url']}/Disable"
+        url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/Disable"
         logger.info(f"Sending disable API request to {url}")
-        response = requests.get(
-            url,
-            params={"device_id": device_id, "chat_id": chat_id, "username": username, "bot_token": bot_token},
-            timeout=5
-        )
+        
+        if request.method == 'POST':
+            response = requests.post(
+                url,
+                json={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                params={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+            
         return jsonify(response.json()), response.status_code
     except requests.RequestException as e:
         logger.error(f"Error in disable API: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/GetStatus', methods=['GET'])
-def api_get_status():
-    device_id = request.args.get('device_id')
-    chat_id = request.args.get('chat_id', "default")
-    username = request.args.get('username', "User")
-    bot_token = request.args.get('bot_token', "")
-    
+@app.route('/Pi/<device_id>/GetStatus', methods=['GET', 'POST'])
+def api_get_status(device_id):
     if not device_id or device_id != pi_device.device_id:
         logger.error(f"Invalid device ID: {device_id}, expected {pi_device.device_id}")
         return jsonify({"status": "error", "message": f"Invalid device ID, expected {pi_device.device_id}"}), 400
     
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        chat_id = data.get('chat_id', "default")
+        timestamp = data.get('timestamp')
+        signature_b64 = data.get('signature')
+        username = data.get('username', "User")
+        bot_token = data.get('bot_token', "")
+    else:
+        chat_id = request.args.get('chat_id', "default")
+        timestamp = request.args.get('timestamp')
+        signature_b64 = request.args.get('signature')
+        username = request.args.get('username', "User")
+        bot_token = request.args.get('bot_token', "")
+    
     try:
         device_config = config.load_device_config()
-        url = f"{device_config['raspberry_pi']['url']}/GetStatus"
+        url = f"{device_config['raspberry_pi']['url']}/Pi/{device_id}/GetStatus"
         logger.info(f"Sending get_status API request to {url}")
-        response = requests.get(
-            url,
-            params={"device_id": device_id, "chat_id": chat_id, "username": username, "bot_token": bot_token},
-            timeout=5
-        )
+        
+        if request.method == 'POST':
+            response = requests.post(
+                url,
+                json={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                params={
+                    "device_id": device_id,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "signature": signature_b64,
+                    "username": username,
+                    "bot_token": bot_token
+                },
+                timeout=5
+            )
+            
         return jsonify(response.json()), response.status_code
     except requests.RequestException as e:
         logger.error(f"Error in get_status API: {e}")
@@ -439,11 +536,7 @@ def api_get_status():
 @app.route('/signature', methods=['POST'])
 def api_signature():
     data = request.get_json()
-    if not data:
-        logger.error("Missing JSON data")
-        return jsonify({"status": "error", "message": "Missing JSON data"}), 400
-    
-    logger.info(f"Received signature request: {data}")
+    logger.info(f"Received signature request")
     return jsonify({"status": "received"}), 200
 
 SWAGGER_URL = '/swagger'
@@ -464,9 +557,6 @@ if __name__ == "__main__":
         load_private_key()
         if not os.path.exists('static'):
             os.makedirs('static')
-        mqtt_thread = threading.Thread(target=pi_device.start_mqtt)
-        mqtt_thread.daemon = True
-        mqtt_thread.start()
         logger.info(f"Starting Flask app on port {config.RASPBERRY_PI_API_PORT}")
         app.run(host="0.0.0.0", port=config.RASPBERRY_PI_API_PORT, debug=False)
     except KeyboardInterrupt:

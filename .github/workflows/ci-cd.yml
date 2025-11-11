@@ -18,51 +18,47 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push test image
+    # 跨平台 timestamp
+    - name: Set image tag (timestamp)
       run: |
+        echo "IMAGE_TAG=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
+      shell: bash
 
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest -f ./IMLine/Dockerfile ./IMLine
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-line:latest
+    - name: Build and push images
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-line:${IMAGE_TAG} -f ./IMLine/Dockerfile ./IMLine
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-line:${IMAGE_TAG}
 
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:latest -f ./IMTelegram/Dockerfile ./IMTelegram
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:latest
-        
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:latest -f ./IoTESP32/Dockerfile ./IoTESP32
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:latest
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:${IMAGE_TAG} -f ./IMTelegram/Dockerfile ./IMTelegram
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:${IMAGE_TAG}
 
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:latest -f ./IoTRaspberrypi/Dockerfile ./IoTRaspberrypi
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:latest
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:${IMAGE_TAG} -f ./IoTESP32/Dockerfile ./IoTESP32
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:${IMAGE_TAG}
 
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:${IMAGE_TAG} -f ./IoTRaspberrypi/Dockerfile ./IoTRaspberrypi
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:${IMAGE_TAG}
 
     - name: Deploy to Kubernetes
       run: |
-        
-        
         kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
-        kubectl apply -f ./IMLine/k8s/Deployment.yml
         kubectl apply -f ./IMLine/k8s/Service.yml
+        kubectl set image deployment/im-line im-line=${{ secrets.DOCKERHUB_USERNAME }}/im-line:${IMAGE_TAG} -n default
 
         kubectl apply -f ./IMTelegram/k8s/deployment.yaml
+        kubectl set image deployment/im-telegram im-telegram=${{ secrets.DOCKERHUB_USERNAME }}/im-telegram:${IMAGE_TAG} -n default
 
         kubectl apply -f ./IoTESP32/k8s/device-confmap.yml
         kubectl apply -f ./IoTESP32/k8s/ecdsa-key-secret.yml
-        kubectl apply -f ./IoTESP32/k8s/Deployment.yml
         kubectl apply -f ./IoTESP32/k8s/Service.yml
+        kubectl set image deployment/iot-esp32 iot-esp32=${{ secrets.DOCKERHUB_USERNAME }}/iot-esp32:${IMAGE_TAG} -n default
 
         kubectl apply -f ./IoTRaspberrypi/k8s/device-confmap.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/ecdsa-key-secret.yml
-        kubectl apply -f ./IoTRaspberrypi/k8s/Deployment.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Service.yml
+        kubectl set image deployment/iot-raspberrypi iot-raspberrypi=${{ secrets.DOCKERHUB_USERNAME }}/iot-raspberrypi:${IMAGE_TAG} -n default
 
-        kubectl apply -f ./Mosquitto/mosquitto-config.yml
-        kubectl apply -f ./Mosquitto/mosquitto-deployment.yml
-        kubectl apply -f ./Mosquitto/mosquitto-service.yml
+        kubectl apply -f ./Mosquitto/mosquitto-config.yml -n messaging
+        kubectl apply -f ./Mosquitto/mosquitto-deployment.yml -n messaging
+        kubectl apply -f ./Mosquitto/mosquitto-service.yml -n messaging
 
-        kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml
-
-    - name: Restart deployment
-      run: |
-        kubectl rollout restart deployment im-line -n default
-        kubectl rollout restart deployment im-telegram -n default
-        kubectl rollout restart deployment iot-esp32 -n default
-        kubectl rollout restart deployment iot-raspberrypi -n default
+        kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml -n messaging

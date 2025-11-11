@@ -1,16 +1,17 @@
-import paho.mqtt.client as mqtt
 import json
 import re
 import logging
 import config
 import time
 import uuid
+import pika
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global client pool, used to reuse MQTT clients by chat_id
+# Global client pool, used to reuse RabbitMQ channels by chat_id
 client_pool = {}
 
 class Device:
@@ -25,7 +26,7 @@ class Device:
         self.device_type = "light" if "light" in device_id else "fan"
         logger.info(f"Initializing device: device_id={device_id}, manufacturer={self.manufacturer}, device_type={self.device_type}")
         try:
-            self.message_api = MessageAPI(config.IOTQUEUE_HOST, config.IOTQUEUE_PORT, platform, device_id, chat_id)
+            self.message_api = MessageAPI(config.RABBITMQ_HOST, config.RABBITMQ_PORT, platform, device_id, chat_id)
         except Exception as e:
             logger.error(f"Failed to initialize MessageAPI for device {device_id}: {e}")
             raise
@@ -78,7 +79,7 @@ class Device:
             return set()
 
     def enable(self, chat_id: str = None, platform: str = "telegram", user_id: str = None, username: str = None, bot_token: str = None) -> bool:
-        topic = f"{self.manufacturer}/{self.device_type}/enable"
+        queue_name = f"iot_{self.manufacturer}_queue"
         message = {
             "command": "on",
             "chat_id": chat_id,
@@ -89,14 +90,14 @@ class Device:
             "bot_token": bot_token or (config.TELEGRAM_BOT_TOKEN if platform == "telegram" else config.LINE_ACCESS_TOKEN)
         }
         try:
-            logger.info(f"Sending enable command: topic={topic}, message={json.dumps(message)}")
-            return self.message_api.send_message(topic, message)
+            logger.info(f"Sending enable command: queue={queue_name}, message={json.dumps(message)}")
+            return self.message_api.send_message(queue_name, message)
         except Exception as e:
-            logger.error(f"Failed to enable device {self.device_id} on topic {topic}: {e}")
+            logger.error(f"Failed to enable device {self.device_id} on queue {queue_name}: {e}")
             return False
 
     def disable(self, chat_id: str = None, platform: str = "telegram", user_id: str = None, username: str = None, bot_token: str = None) -> bool:
-        topic = f"{self.manufacturer}/{self.device_type}/disable"
+        queue_name = f"iot_{self.manufacturer}_queue"
         message = {
             "command": "off",
             "chat_id": chat_id,
@@ -107,14 +108,14 @@ class Device:
             "bot_token": bot_token or (config.TELEGRAM_BOT_TOKEN if platform == "telegram" else config.LINE_ACCESS_TOKEN)
         }
         try:
-            logger.info(f"Sending disable command: topic={topic}, message={json.dumps(message)}")
-            return self.message_api.send_message(topic, message)
+            logger.info(f"Sending disable command: queue={queue_name}, message={json.dumps(message)}")
+            return self.message_api.send_message(queue_name, message)
         except Exception as e:
-            logger.error(f"Failed to disable device {self.device_id} on topic {topic}: {e}")
+            logger.error(f"Failed to disable device {self.device_id} on queue {queue_name}: {e}")
             return False
 
     def get_status(self, chat_id: str = None, platform: str = "telegram", user_id: str = None, username: str = None, bot_token: str = None) -> bool:
-        topic = f"{self.manufacturer}/{self.device_type}/get_status"
+        queue_name = f"iot_{self.manufacturer}_queue"
         message = {
             "command": "get_status",
             "chat_id": chat_id,
@@ -125,10 +126,10 @@ class Device:
             "bot_token": bot_token or (config.TELEGRAM_BOT_TOKEN if platform == "telegram" else config.LINE_ACCESS_TOKEN)
         }
         try:
-            logger.info(f"Sending get status command: topic={topic}, message={json.dumps(message)}")
-            return self.message_api.send_message(topic, message)
+            logger.info(f"Sending get status command: queue={queue_name}, message={json.dumps(message)}")
+            return self.message_api.send_message(queue_name, message)
         except Exception as e:
-            logger.error(f"Failed to get status for device {self.device_id} on topic {topic}: {e}")
+            logger.error(f"Failed to get status for device {self.device_id} on queue {queue_name}: {e}")
             return False
 
 class MessageAPI:
@@ -138,64 +139,58 @@ class MessageAPI:
         self.device_id = device_id
         self.platform = platform
         self.chat_id = chat_id or "default"
+        self.connection = None
+        self.channel = None
         if self.chat_id in client_pool:
-            self.client = client_pool[self.chat_id]
-            logger.info(f"Reusing MQTT client, chat_id={self.chat_id}")
+            self.channel = client_pool[self.chat_id]
+            logger.info(f"Reusing RabbitMQ channel, chat_id={self.chat_id}")
         else:
             try:
                 client_id = f"iotq_broker_{platform}_{self.chat_id}_{str(uuid.uuid4())[:8]}"
-                self.client = mqtt.Client(client_id=client_id)
-                self.client.on_connect = self.on_connect
-                self.client.on_disconnect = self.on_disconnect
-                self.client.reconnect_delay_set(min_delay=1, max_delay=120)
-                client_pool[self.chat_id] = self.client
-                logger.info(f"Created new MQTT client, chat_id={self.chat_id}, client_id={client_id}")
-                self.connect()
+                self._reconnect(client_id)
+                client_pool[self.chat_id] = self.channel
+                logger.info(f"Created new RabbitMQ channel, chat_id={self.chat_id}, client_id={client_id}")
             except Exception as e:
-                logger.error(f"Failed to create MQTT client, chat_id={self.chat_id}: {e}")
+                logger.error(f"Failed to create RabbitMQ channel, chat_id={self.chat_id}: {e}")
                 raise
 
-    def on_connect(self, client, userdata, flags, rc):
-        if rc == 0:
-            logger.info(f"Client {client._client_id} connected to IOTQueue broker")
-        else:
-            logger.error(f"Client {client._client_id} failed to connect to IOTQueue broker, return code: {rc}")
-
-    def on_disconnect(self, client, userdata, rc):
-        logger.warning(f"Client {client._client_id} disconnected from IOTQueue broker, attempting to reconnect...")
-
-    def connect(self):
-        max_retries = 5
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                self.client.connect(self.broker_host, self.broker_port)
-                self.client.loop_start()
-                logger.info(f"Client {self.client._client_id} connected to MQTT broker")
-                return
-            except Exception as e:
-                retry_count += 1
-                logger.error(f"Client {self.client._client_id} failed to connect to MQTT broker (attempt {retry_count}/{max_retries}): {e}")
-                if retry_count == max_retries:
-                    raise
-                time.sleep(5)
-
-    def send_message(self, topic: str, message: dict) -> bool:
+    def _reconnect(self, client_id: str = None):
         try:
-            self.client.publish(topic, json.dumps(message))
-            logger.info(f"IOTQueue message sent successfully: topic={topic}, message={json.dumps(message)}")
+            if self.connection and not self.connection.is_closed:
+                self.connection.close()
+            parameters = pika.ConnectionParameters(host=self.broker_host, port=self.broker_port)
+            self.connection = pika.BlockingConnection(parameters)
+            self.channel = self.connection.channel()
+            logger.info(f"Reconnected RabbitMQ channel, chat_id={self.chat_id}, client_id={client_id}")
+        except Exception as e:
+            logger.error(f"Failed to reconnect RabbitMQ channel, chat_id={self.chat_id}: {e}")
+            raise
+
+    def send_message(self, queue_name: str, message: dict) -> bool:
+        try:
+            if not self.connection or self.connection.is_closed or not self.channel or self.channel.is_closed:
+                logger.info(f"RabbitMQ connection or channel closed, reconnecting for chat_id={self.chat_id}")
+                self._reconnect()
+            self.channel.queue_declare(queue=queue_name, durable=True)
+            self.channel.basic_publish(
+                exchange='',
+                routing_key=queue_name,
+                body=json.dumps(message),
+                properties=pika.BasicProperties(delivery_mode=2)
+            )
+            logger.info(f"RabbitMQ message sent successfully: queue={queue_name}, message={json.dumps(message)}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send IOTQueue message: topic={topic}, error={e}")
+            logger.error(f"Failed to send RabbitMQ message: queue={queue_name}, error={e}")
             return False
 
     def stop(self):
         try:
-            self.client.loop_stop()
-            self.client.disconnect()
-            logger.info(f"Client {self.client._client_id} stopped")
+            if self.connection and not self.connection.is_closed:
+                self.connection.close()
+            logger.info(f"RabbitMQ connection stopped for chat_id={self.chat_id}")
         except Exception as e:
-            logger.error(f"Failed to stop MQTT client {self.client._client_id}: {e}")
+            logger.error(f"Failed to stop RabbitMQ connection for chat_id={self.chat_id}: {e}")
 
 def IoTParse_Message(message_text: str, device: Device, chat_id: str, platform: str = "telegram", user_id: str = None, username: str = None) -> dict:
     message_text = message_text.lower().strip()
@@ -259,21 +254,21 @@ def IoTParse_Message(message_text: str, device: Device, chat_id: str, platform: 
 
         if enable_match:
             if target_device.enable(chat_id, platform, user_id, username, bot_token):
-                send_message(chat_id, f"Command received: Enable {device_id}", platform, user_id=user_id, username=username)
+                # 移除 "Command received" 回覆
                 return {"success": True, "action": "Enable", "device_id": device_id}
             else:
                 send_message(chat_id, f"Failed to enable device {device_id}", platform, user_id=user_id, username=username)
                 return {"success": False, "message": "Failed to enable device"}
         elif disable_match:
             if target_device.disable(chat_id, platform, user_id, username, bot_token):
-                send_message(chat_id, f"Command received: Disable {device_id}", platform, user_id=user_id, username=username)
+                # 移除 "Command received" 回覆
                 return {"success": True, "action": "Disable", "device_id": device_id}
             else:
                 send_message(chat_id, f"Failed to disable device {device_id}", platform, user_id=user_id, username=username)
                 return {"success": False, "message": "Failed to disable device"}
         elif status_match:
             if target_device.get_status(chat_id, platform, user_id, username, bot_token):
-                send_message(chat_id, f"Command received: Get status of {device_id}", platform, user_id=user_id, username=username)
+                # 移除 "Command received" 回覆
                 return {"success": True, "action": "GetStatus", "device_id": device_id}
             else:
                 send_message(chat_id, f"Failed to get status of device {device_id}", platform, user_id=user_id, username=username)
