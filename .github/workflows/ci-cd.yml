@@ -53,7 +53,10 @@ jobs:
      
     - name: Install RabbitMQ Cluster Operator
       run: |
-        helm upgrade --install my-release oci://registry-1.docker.io/bitnamicharts/rabbitmq-cluster-operator
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm repo update
+        helm upgrade --install rabbit-operator bitnami/rabbitmq-cluster-operator -n messaging --create-namespace 
+    
 
     - name: Install Kong Ingress Controller
       run: |
