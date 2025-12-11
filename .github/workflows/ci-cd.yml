@@ -55,7 +55,8 @@ jobs:
       run: |
         helm repo add bitnami https://charts.bitnami.com/bitnami
         helm repo update
-        helm upgrade --install rabbit-operator bitnami/rabbitmq-cluster-operator -n messaging --create-namespace    
+        helm upgrade --install rabbit-operator bitnami/rabbitmq-cluster-operator -n messaging --create-namespace --set clusterOperator.image.tag=2.15.1-debian-12-r2
+    
 
     - name: Install Kong Ingress Controller
       run: |
@@ -65,8 +66,8 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
-        kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml
-        kubectl applt -f ./ingress.yml
+        kubectl apply -f ./rabbitMQ/rabbitmq_cluster.yml -n messaging
+        kubectl apply -f ./ingress.yml
 
         kubectl apply -f ./IMLine/k8s/Linebot-Secret.yml
         kubectl apply -f ./IMLine/k8s/Deployment.yml
@@ -84,9 +85,9 @@ jobs:
         kubectl apply -f ./IoTRaspberrypi/k8s/Deployment.yml
         kubectl apply -f ./IoTRaspberrypi/k8s/Service.yml
 
-        kubectl apply -f ./Mosquitto/mosquitto-config.yml
-        kubectl apply -f ./Mosquitto/mosquitto-deployment.yml
-        kubectl apply -f ./Mosquitto/mosquitto-service.yml
+        kubectl apply -f ./Mosquitto/mosquitto-config.yml -n messaging
+        kubectl apply -f ./Mosquitto/mosquitto-deployment.yml -n messaging
+        kubectl apply -f ./Mosquitto/mosquitto-service.yml -n messaging
 
 
     - name: Update image tag
